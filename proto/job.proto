@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package jobexecutor;
+
+option go_package = "github.com/adarshaherle/jobexecutor/proto;jobexecutor";
+
+// JobOptions for resource limits.
+message JobOptions {
+  int32 cpuLimit = 1;
+  int32 memoryLimitMb = 2;
+  int32 diskIOLimitBps = 3;
+}
+
+// Request to start a job.
+message StartJobRequest {
+  repeated string command = 1;
+  JobOptions options = 2;
+}
+
+// Response after starting a job.
+message StartJobResponse {
+  string jobId = 1;
+}
+
+// Request to stop a job.
+message StopJobRequest {
+  string jobId = 1;
+}
+
+// Response after stopping a job.
+message StopJobResponse {
+  bool success = 1;
+}
+
+// Request for job status.
+message JobStatusRequest {
+  string jobId = 1;
+}
+
+// Response for job status.
+message JobStatusResponse {
+  string jobId = 1;
+  string status = 2;
+  int32 exitCode = 3;
+}
+
+// Request to stream job output.
+message JobOutputRequest {
+  string jobId = 1;
+}
+
+// A chunk of job output.
+message JobOutputChunk {
+  bytes data = 1;
+}
+
+// The JobService definition.
+service JobService {
+  rpc StartJob(StartJobRequest) returns (StartJobResponse);
+  rpc StopJob(StopJobRequest) returns (StopJobResponse);
+  rpc GetJobStatus(JobStatusRequest) returns (JobStatusResponse);
+  rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
+}
