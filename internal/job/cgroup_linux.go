@@ -13,13 +13,13 @@ import (
 
 var cgroupBasePath = "/sys/fs/cgroup/jobexecutor"
 
-// SetupCgroup creates a cgroup for the job and applies resource limits.
+// SetupCgroup creates a cgroup for a job and applies resource limits.
 func SetupCgroup(jobID string, cpuQuota, memLimit, diskIOLimit, pid int) error {
 	cgPath := filepath.Join(cgroupBasePath, jobID)
 	if err := os.MkdirAll(cgPath, 0755); err != nil {
 		return fmt.Errorf("failed to create cgroup directory: %w", err)
 	}
-	// CPU limits.
+	// Set CPU limits.
 	if cpuQuota > 0 {
 		period := "100000" // 100ms period
 		if err := ioutil.WriteFile(filepath.Join(cgPath, "cpu.cfs_period_us"), []byte(period), 0644); err != nil {
@@ -30,7 +30,7 @@ func SetupCgroup(jobID string, cpuQuota, memLimit, diskIOLimit, pid int) error {
 			return fmt.Errorf("failed to write cpu quota: %w", err)
 		}
 	}
-	// Memory limit in bytes.
+	// Set memory limit in bytes.
 	if memLimit > 0 {
 		memBytes := memLimit * 1024 * 1024
 		memStr := strconv.Itoa(memBytes)
@@ -38,7 +38,7 @@ func SetupCgroup(jobID string, cpuQuota, memLimit, diskIOLimit, pid int) error {
 			return fmt.Errorf("failed to write memory limit: %w", err)
 		}
 	}
-	// Disk I/O limits.
+	// Set disk I/O limits.
 	if diskIOLimit > 0 {
 		ioLimit := fmt.Sprintf("rbps=%d wbps=%d", diskIOLimit, diskIOLimit)
 		if err := ioutil.WriteFile(filepath.Join(cgPath, "io.max"), []byte(ioLimit), 0644); err != nil {
@@ -53,7 +53,7 @@ func SetupCgroup(jobID string, cpuQuota, memLimit, diskIOLimit, pid int) error {
 	return nil
 }
 
-// CleanupCgroup removes the cgroup directory.
+// CleanupCgroup removes the cgroup directory for a job.
 func CleanupCgroup(jobID string) error {
 	cgPath := filepath.Join(cgroupBasePath, jobID)
 	return os.RemoveAll(cgPath)

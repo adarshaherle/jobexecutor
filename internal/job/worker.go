@@ -7,7 +7,6 @@ import (
 	"io"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -48,10 +47,10 @@ type JobOptions struct {
 
 // Job represents a process running as a job.
 type Job struct {
-	ID         string
-	Command    []string
-	Status     JobStatus
-	Output     bytes.Buffer
+	ID      string
+	Command []string
+	Status  JobStatus
+	Output  bytes.Buffer
 
 	exitCode   int
 	startedAt  time.Time
@@ -83,16 +82,6 @@ func (j *Job) Subscribe() chan []byte {
 		}
 	}()
 	return ch
-}
-
-// Using a generic helper function (new in Go 1.21) to remove a channel from the slice.
-func removeChannel[T any](subs []chan T, target chan T) []chan T {
-	for i, ch := range subs {
-		if ch == target {
-			return append(subs[:i], subs[i+1:]...)
-		}
-	}
-	return subs
 }
 
 func (j *Job) broadcastOutput(data []byte) {
@@ -149,6 +138,14 @@ func NewManager() *Manager {
 	return &Manager{jobs: make(map[string]*Job)}
 }
 
+// GetJob returns the job with the given ID.
+func (m *Manager) GetJob(jobID string) (*Job, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[jobID]
+	return job, ok
+}
+
 // generateJobID returns a pseudo-unique job ID.
 func generateJobID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
@@ -174,11 +171,11 @@ func (m *Manager) StartJob(command []string, opts JobOptions) (string, error) {
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Set up the command with Linux namespace isolation.
+	// Set up the command with namespace isolation if available.
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET,
-	}
+	// Use our helper function to get platform-specific SysProcAttr.
+	cmd.SysProcAttr = getSysProcAttr()
+
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("failed to get stdout pipe: %w", err)
@@ -204,8 +201,6 @@ func (m *Manager) StartJob(command []string, opts JobOptions) (string, error) {
 
 	go job.captureOutput(stdoutPipe)
 	go job.captureOutput(stderrPipe)
-
-	// Wait for process to finish and update job status.
 	go func(j *Job) {
 		err := cmd.Wait()
 		j.mu.Lock()

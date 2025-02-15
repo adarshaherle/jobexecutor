@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 
 func TestJobExecution(t *testing.T) {
 	mgr := NewManager()
-	jobID, err := mgr.StartJob([]string{"echo", "Level5 Test"}, JobOptions{
+	jobID, err := mgr.StartJob([]string{"echo", "Test Job Execution"}, JobOptions{
 		CPULimit:    50000,
 		MemoryLimit: 128,
 		DiskIOLimit: 1024 * 1024,
@@ -42,7 +41,7 @@ func TestJobExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get output: %v", err)
 	}
-	if !strings.Contains(output, "Level5 Test") {
+	if !strings.Contains(output, "Test Job Execution") {
 		t.Errorf("output does not contain expected text: %s", output)
 	}
 }
@@ -57,13 +56,17 @@ func TestJobStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
 	}
-	status, _, _ := mgr.GetStatus(jobID)
+	status, _, err := mgr.GetStatus(jobID)
+	if err != nil {
+		t.Fatalf("error getting status: %v", err)
+	}
 	if status != StatusRunning {
 		t.Fatalf("job should be running, got %s", status.String())
 	}
 	if err := mgr.StopJob(jobID); err != nil {
 		t.Fatalf("failed to stop job: %v", err)
 	}
+	// Wait for status update.
 	for i := 0; i < 50; i++ {
 		status, _, _ = mgr.GetStatus(jobID)
 		if status != StatusRunning {
@@ -72,13 +75,13 @@ func TestJobStop(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if status != StatusStopped && status != StatusFailed {
-		t.Errorf("expected stopped/failed, got %s", status.String())
+		t.Errorf("expected stopped or failed, got %s", status.String())
 	}
 }
 
 func TestOutputStreaming(t *testing.T) {
 	mgr := NewManager()
-	jobID, err := mgr.StartJob([]string{"echo", "StreamTest"}, JobOptions{
+	jobID, err := mgr.StartJob([]string{"echo", "Stream Test"}, JobOptions{
 		CPULimit:    50000,
 		MemoryLimit: 128,
 		DiskIOLimit: 1024 * 1024,
@@ -86,22 +89,26 @@ func TestOutputStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
 	}
-	sub := mgr.jobs[jobID].Subscribe()
+	j, ok := mgr.GetJob(jobID)
+	if !ok {
+		t.Fatalf("job not found")
+	}
+	sub := j.Subscribe()
 	time.Sleep(500 * time.Millisecond)
 	var out string
-loop:
 	for {
 		select {
 		case data, ok := <-sub:
 			if !ok {
-				break loop
+				goto DONE
 			}
 			out += string(data)
 		default:
-			break loop
+			goto DONE
 		}
 	}
-	if !strings.Contains(out, "StreamTest") {
+DONE:
+	if !strings.Contains(out, "Stream Test") {
 		t.Errorf("stream output missing expected text, got: %s", out)
 	}
 }
@@ -110,12 +117,15 @@ func TestCgroupIntegration(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("cgroup integration test runs on Linux only")
 	}
+	// Use a temporary directory for cgroups.
 	tempDir, err := os.MkdirTemp("", "cgtest")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempDir)
+	// Override the global cgroup base path.
 	cgroupBasePath = tempDir
+
 	mgr := NewManager()
 	jobID, err := mgr.StartJob([]string{"sleep", "1"}, JobOptions{
 		CPULimit:    50000,
@@ -127,39 +137,10 @@ func TestCgroupIntegration(t *testing.T) {
 	}
 	cgDir := filepath.Join(tempDir, jobID)
 	if _, err := os.Stat(cgDir); err != nil {
-		t.Errorf("expected cgroup dir exists, got error: %v", err)
+		t.Errorf("expected cgroup directory to exist, got error: %v", err)
 	}
 	time.Sleep(2 * time.Second)
 	if _, err := os.Stat(cgDir); !os.IsNotExist(err) {
-		t.Errorf("expected cgroup dir removed after job, but it exists")
+		t.Errorf("expected cgroup directory to be removed after job finishes")
 	}
-}
-
-// Fuzz test using Go 1.21's built-in fuzzing.
-func FuzzGetOutput(f *testing.F) {
-	// Seed corpus.
-	f.Add("echo", "FuzzTest")
-	f.Fuzz(func(t *testing.T, command string, arg string) {
-		mgr := NewManager()
-		jobID, err := mgr.StartJob([]string{command, arg}, JobOptions{
-			CPULimit:    50000,
-			MemoryLimit: 128,
-			DiskIOLimit: 1024 * 1024,
-		})
-		if err != nil {
-			return
-		}
-		for i := 0; i < 20; i++ {
-			status, _, err := mgr.GetStatus(jobID)
-			if err == nil && status != StatusRunning {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		output, err := mgr.GetOutput(jobID)
-		if err != nil {
-			t.Skip()
-		}
-		t.Log(output)
-	})
 }

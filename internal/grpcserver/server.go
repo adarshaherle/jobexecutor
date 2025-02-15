@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/adarshaherle/jobexecutor/proto"
 	"github.com/adarshaherle/jobexecutor/internal/job"
+	pb "github.com/adarshaherle/jobexecutor/proto"
 )
 
 type jobServiceServer struct {
@@ -55,13 +55,11 @@ func (s *jobServiceServer) GetJobStatus(ctx context.Context, req *pb.JobStatusRe
 }
 
 func (s *jobServiceServer) StreamOutput(req *pb.JobOutputRequest, stream pb.JobService_StreamOutputServer) error {
-	s.mgr.mu.Lock()
-	job, ok := s.mgr.jobs[req.JobId]
-	s.mgr.mu.Unlock()
+	j, ok := s.mgr.GetJob(req.JobId)
 	if !ok {
 		return fmt.Errorf("job not found")
 	}
-	sub := job.Subscribe()
+	sub := j.Subscribe()
 	for chunk := range sub {
 		if err := stream.Send(&pb.JobOutputChunk{Data: chunk}); err != nil {
 			return err
