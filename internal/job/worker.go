@@ -2,12 +2,14 @@ package job
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"os/exec"
 	"sync"
-
+	"syscall"
+	"time"
 )
 
 // JobState represents the current state of a job.
@@ -51,6 +53,9 @@ type Job struct {
 	// Subscribers for real‑time output.
 	subMu       sync.Mutex
 	subscribers []chan string
+
+	// cancel is the context cancellation function.
+	cancel context.CancelFunc
 }
 
 func newJob(id string, cmd *exec.Cmd) *Job {
@@ -136,13 +141,16 @@ func NewJobManager() *JobManager {
 	return &JobManager{jobs: make(map[string]*Job)}
 }
 
-// Start launches a new job.
+// Start launches a new job using a cancellable context and a new process group.
 func (m *JobManager) Start(command string, args []string) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("command cannot be empty")
 	}
-	cmd := exec.Command(command, args...)
-	cmd.SysProcAttr = getSysProcAttr()
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use CommandContext so that cancellation terminates the process.
+	cmd := exec.CommandContext(ctx, command, args...)
+	// Create a new process group.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// Create a pipe to capture output.
 	pr, pw := io.Pipe()
@@ -150,6 +158,7 @@ func (m *JobManager) Start(command string, args []string) (string, error) {
 	cmd.Stderr = pw
 
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return "", fmt.Errorf("failed to start command: %w", err)
 	}
 
@@ -157,6 +166,7 @@ func (m *JobManager) Start(command string, args []string) (string, error) {
 	jobID := fmt.Sprintf("job-%d", m.nextID)
 	m.nextID++
 	job := newJob(jobID, cmd)
+	job.cancel = cancel
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
@@ -170,7 +180,7 @@ func (m *JobManager) Start(command string, args []string) (string, error) {
 		log.Printf("Warning: cgroup limits not applied: %v", err)
 	}
 
-	// Use a scanner to read output continuously.
+	// Launch a goroutine to scan output continuously.
 	go func(j *Job) {
 		scanner := bufio.NewScanner(pr)
 		for scanner.Scan() {
@@ -180,9 +190,13 @@ func (m *JobManager) Start(command string, args []string) (string, error) {
 		if err := scanner.Err(); err != nil {
 			log.Printf("Error reading output for job %s: %v", jobID, err)
 		}
+	}(job)
 
-		// Wait for the command to finish.
+	// Launch a goroutine to wait for the command to finish.
+	go func(j *Job) {
 		err := cmd.Wait()
+		// Ensure we close the writer end.
+		pw.Close()
 		exitCode := 0
 		if err != nil {
 			if ee, ok := err.(*exec.ExitError); ok {
@@ -192,14 +206,16 @@ func (m *JobManager) Start(command string, args []string) (string, error) {
 			}
 		}
 		j.finish(exitCode, err)
-		// Close the writer end.
-		pw.Close()
+		// Remove the cgroup directory.
+		if err := RemoveCgroup(jobID); err != nil {
+			log.Printf("Warning: failed to remove cgroup for job %s: %v", jobID, err)
+		}
 	}(job)
 
 	return jobID, nil
 }
 
-// Stop terminates a running job.
+// Stop terminates a running job by cancelling its context and then killing its process group if needed.
 func (m *JobManager) Stop(jobID string) error {
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
@@ -207,10 +223,24 @@ func (m *JobManager) Stop(jobID string) error {
 	if !ok {
 		return fmt.Errorf("job %s not found", jobID)
 	}
-	if job.Cmd.Process == nil {
-		return fmt.Errorf("no process found for job %s", jobID)
+	// First, cancel the context.
+	if job.cancel != nil {
+		job.cancel()
+		// Allow some time for cancellation to propagate.
+		time.Sleep(500 * time.Millisecond)
 	}
-	return job.Cmd.Process.Kill()
+	// If still running, kill the entire process group.
+	if job.Cmd != nil && job.Cmd.Process != nil {
+		// Use negative PID to signal the entire process group.
+		if err := syscall.Kill(-job.Cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			// Ignore "no such process" error.
+			if err == syscall.ESRCH {
+				return nil
+			}
+			return fmt.Errorf("failed to kill process group: %w", err)
+		}
+	}
+	return nil
 }
 
 // Status returns the current state of a job.

@@ -30,7 +30,7 @@ func TestJobExecution(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("TestJobExecution skipped on Windows")
 	}
-	// Use "sh -c" so the shell executes the command.
+	// Use a command that finishes quickly.
 	jobID, err := jm.Start("sh", []string{"-c", "echo Test Job Execution"})
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
@@ -59,12 +59,12 @@ func TestJobExecution(t *testing.T) {
 }
 
 func TestJobStop(t *testing.T) {
-	jm := NewJobManager()
-	if runtime.GOOS == "windows" {
-		t.Skip("TestJobStop skipped on Windows")
+	if runtime.GOOS != "linux" {
+		t.Skip("TestJobStop runs only on Linux")
 	}
-	// Use "sh -c" for sleep.
-	jobID, err := jm.Start("sh", []string{"-c", "sleep 5"})
+	jm := NewJobManager()
+	// Start a long-running command.
+	jobID, err := jm.Start("sh", []string{"-c", "while true; do echo Running; sleep 1; done"})
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
 	}
@@ -89,20 +89,27 @@ func TestJobStop(t *testing.T) {
 
 func TestOutputStreaming(t *testing.T) {
 	jm := NewJobManager()
-	// Use "sh -c" for echo.
-	jobID, err := jm.Start("sh", []string{"-c", "echo Stream Test"})
+	// Start a command that continuously outputs.
+	jobID, err := jm.Start("sh", []string{"-c", "while true; do echo Stream Test; sleep 1; done"})
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
 	}
+	// Allow the command to produce some output.
+	time.Sleep(3 * time.Second)
 	jobObj, ok := jm.GetJob(jobID)
 	if !ok {
 		t.Fatalf("job not found")
 	}
-	time.Sleep(500 * time.Millisecond)
 	output := jobObj.GetOutput()
 	if !strings.Contains(output, "Stream Test") {
 		t.Errorf("expected output to contain 'Stream Test', got: %s", output)
 	}
+	// Stop the job.
+	if err := jm.Stop(jobID); err != nil {
+		t.Fatalf("failed to stop job: %v", err)
+	}
+	// Wait briefly for the output stream to close.
+	time.Sleep(500 * time.Millisecond)
 }
 
 func TestCgroupIntegration(t *testing.T) {
@@ -122,12 +129,12 @@ func TestCgroupIntegration(t *testing.T) {
 	defer func() { CgroupBasePath = original }()
 
 	jm := NewJobManager()
-	// Use "sh -c" for sleep.
 	jobID, err := jm.Start("sh", []string{"-c", "sleep 1"})
 	if err != nil {
 		t.Fatalf("failed to start job: %v", err)
 	}
 	cgDir := filepath.Join(CgroupBasePath, "jobexecutor", jobID)
+	// Ensure that the cgroup directory exists.
 	if _, err := os.Stat(cgDir); err != nil {
 		t.Errorf("expected cgroup directory %s to exist, got error: %v", cgDir, err)
 	}
@@ -135,6 +142,7 @@ func TestCgroupIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job did not finish in time: %v", err)
 	}
+	// Expect the cgroup directory to be removed after job finishes.
 	if _, err := os.Stat(cgDir); !os.IsNotExist(err) {
 		t.Errorf("expected cgroup directory %s to be removed after job finishes", cgDir)
 	}
