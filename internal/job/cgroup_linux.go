@@ -4,57 +4,64 @@
 package job
 
 import (
-	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"strconv"
+    "fmt"
+    "os"
+    "path/filepath"
+    "strconv"
 )
 
-var cgroupBasePath = "/sys/fs/cgroup/jobexecutor"
+// CgroupBasePath is set from the environment if provided, else defaults to /sys/fs/cgroup.
+var CgroupBasePath = func() string {
+    if v := os.Getenv("CGROUP_BASE"); v != "" {
+        return v
+    }
+    return "/sys/fs/cgroup"
+}()
 
-// SetupCgroup creates a cgroup for a job and applies resource limits.
-func SetupCgroup(jobID string, cpuQuota, memLimit, diskIOLimit, pid int) error {
-	cgPath := filepath.Join(cgroupBasePath, jobID)
-	if err := os.MkdirAll(cgPath, 0755); err != nil {
-		return fmt.Errorf("failed to create cgroup directory: %w", err)
-	}
-	// Set CPU limits.
-	if cpuQuota > 0 {
-		period := "100000" // 100ms period
-		if err := ioutil.WriteFile(filepath.Join(cgPath, "cpu.cfs_period_us"), []byte(period), 0644); err != nil {
-			return fmt.Errorf("failed to write cpu period: %w", err)
-		}
-		quotaStr := strconv.Itoa(cpuQuota)
-		if err := ioutil.WriteFile(filepath.Join(cgPath, "cpu.cfs_quota_us"), []byte(quotaStr), 0644); err != nil {
-			return fmt.Errorf("failed to write cpu quota: %w", err)
-		}
-	}
-	// Set memory limit in bytes.
-	if memLimit > 0 {
-		memBytes := memLimit * 1024 * 1024
-		memStr := strconv.Itoa(memBytes)
-		if err := ioutil.WriteFile(filepath.Join(cgPath, "memory.limit_in_bytes"), []byte(memStr), 0644); err != nil {
-			return fmt.Errorf("failed to write memory limit: %w", err)
-		}
-	}
-	// Set disk I/O limits.
-	if diskIOLimit > 0 {
-		ioLimit := fmt.Sprintf("rbps=%d wbps=%d", diskIOLimit, diskIOLimit)
-		if err := ioutil.WriteFile(filepath.Join(cgPath, "io.max"), []byte(ioLimit), 0644); err != nil {
-			return fmt.Errorf("failed to write io limit: %w", err)
-		}
-	}
-	// Add process to the cgroup.
-	pidStr := strconv.Itoa(pid)
-	if err := ioutil.WriteFile(filepath.Join(cgPath, "cgroup.procs"), []byte(pidStr), 0644); err != nil {
-		return fmt.Errorf("failed to add pid to cgroup: %w", err)
-	}
-	return nil
+type ResourceLimits struct {
+    CPUQuotaPercent  int   // e.g., 50 means 50%
+    MemoryLimitBytes int64 // e.g., 100*1024*1024 for 100MB
+    BlockIOWeight    int   // e.g., 500 out of 1000
 }
 
-// CleanupCgroup removes the cgroup directory for a job.
-func CleanupCgroup(jobID string) error {
-	cgPath := filepath.Join(cgroupBasePath, jobID)
-	return os.RemoveAll(cgPath)
+func ApplyCgroupLimits(jobID string, pid int, limits ResourceLimits) error {
+    // If disabled, skip cgroup application.
+    if os.Getenv("DISABLE_CGROUP") == "true" {
+        return nil
+    }
+    cgPath := filepath.Join(CgroupBasePath, "jobexecutor", jobID)
+    if err := os.MkdirAll(cgPath, 0755); err != nil {
+        return fmt.Errorf("failed to create cgroup directory: %w", err)
+    }
+    if limits.CPUQuotaPercent > 0 && limits.CPUQuotaPercent <= 100 {
+        period := int64(100000)
+        quota := period * int64(limits.CPUQuotaPercent) / 100
+        cpuMaxPath := filepath.Join(cgPath, "cpu.max")
+        if err := os.WriteFile(cpuMaxPath, []byte(fmt.Sprintf("%d %d", quota, period)), 0644); err != nil {
+            return fmt.Errorf("failed to write cpu.max: %w", err)
+        }
+    }
+    if limits.MemoryLimitBytes > 0 {
+        memMaxPath := filepath.Join(cgPath, "memory.max")
+        if err := os.WriteFile(memMaxPath, []byte(strconv.FormatInt(limits.MemoryLimitBytes, 10)), 0644); err != nil {
+            return fmt.Errorf("failed to write memory.max: %w", err)
+        }
+    }
+    if limits.BlockIOWeight > 0 {
+        ioMaxPath := filepath.Join(cgPath, "io.max")
+        ioLimit := fmt.Sprintf("rbps=%d wbps=%d", limits.BlockIOWeight*1024, limits.BlockIOWeight*1024)
+        if err := os.WriteFile(ioMaxPath, []byte(ioLimit), 0644); err != nil {
+            return fmt.Errorf("failed to write io.max: %w", err)
+        }
+    }
+    procsPath := filepath.Join(cgPath, "cgroup.procs")
+    if err := os.WriteFile(procsPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+        return fmt.Errorf("failed to write cgroup.procs: %w", err)
+    }
+    return nil
+}
+
+func RemoveCgroup(jobID string) error {
+    cgPath := filepath.Join(CgroupBasePath, "jobexecutor", jobID)
+    return os.RemoveAll(cgPath)
 }

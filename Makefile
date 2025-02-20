@@ -1,23 +1,26 @@
-.PHONY: build test run docker-build docker-run
+.PHONY: all proto build test docker-run docker-test clean
+
+all: proto build
+
+proto:
+	protoc --proto_path=proto --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. proto/job.proto
 
 build:
-	@echo "Building server and CLI..."
 	mkdir -p bin
-	go build -o bin/jobworker-server ./cmd/server/main.go
-	go build -o bin/jobworker-cli ./cmd/cli/main.go
+	go build -o bin/jobexecutor-server ./cmd/server
+	go build -o bin/jobexecutor ./cmd/cli
 
 test:
-	@echo "Running tests..."
-	go test -race -coverprofile=coverage.out ./internal/job/...
-	@echo "Test coverage:"
-	go tool cover -func=coverage.out | grep total
-
-run: build
-	@echo "Starting gRPC server..."
-	bin/jobworker-server
-
-docker-build:
-	docker build -t jobexecutor:latest .
+	go test -v -race ./internal/job/...
+	go test -v ./internal/grpcserver/...
 
 docker-run:
-	docker run --rm -it --privileged --cgroupns=host -p 50051:50051 jobexecutor:latest
+	docker build --no-cache -t jobexecutor .
+	# This target runs the final runtime image.
+	docker run --rm -it --privileged --cap-add=ALL --security-opt seccomp=seccomp.json   -v $(PWD)/certs:/app/certs -w /app -p 50051:50051 jobexecutor ./jobexecutor-server --cert=certs/server.crt --key=certs/server.key --ca=certs/ca.crt --addr=:50051
+
+docker-test:
+	docker build --no-cache --target tester -t jobexecutor-tester .
+	docker run --rm -it --privileged --cap-add=ALL --security-opt seccomp=seccomp.json -e CGROUP_BASE=/tmp/cgroup -e DISABLE_CGROUP=false jobexecutor-tester
+clean:
+	rm -rf bin

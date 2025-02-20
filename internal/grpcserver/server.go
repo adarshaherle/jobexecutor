@@ -2,68 +2,91 @@ package grpcserver
 
 import (
 	"context"
-	"fmt"
+	"log"
 
 	"github.com/adarshaherle/jobexecutor/internal/job"
 	pb "github.com/adarshaherle/jobexecutor/proto"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-type jobServiceServer struct {
+type Server struct {
 	pb.UnimplementedJobServiceServer
-	mgr *job.Manager
+	Manager    *job.JobManager
+	AllowedCNs map[string]bool // Optional: for authorization
 }
 
-func NewJobServiceServer() pb.JobServiceServer {
-	return &jobServiceServer{
-		mgr: job.NewManager(),
+func NewServer(manager *job.JobManager, allowedCNs map[string]bool) *Server {
+	return &Server{
+		Manager:    manager,
+		AllowedCNs: allowedCNs,
 	}
 }
 
-func (s *jobServiceServer) StartJob(ctx context.Context, req *pb.StartJobRequest) (*pb.StartJobResponse, error) {
-	if len(req.Command) == 0 {
-		return nil, fmt.Errorf("command cannot be empty")
+func (s *Server) StartJob(ctx context.Context, req *pb.JobStartRequest) (*pb.JobStartResponse, error) {
+	if req.Command == "" {
+		return nil, status.Error(codes.InvalidArgument, "command cannot be empty")
 	}
-	opts := job.JobOptions{
-		CPULimit:    int(req.Options.CpuLimit),
-		MemoryLimit: int(req.Options.MemoryLimitMb),
-		DiskIOLimit: int(req.Options.DiskIOLimitBps),
-	}
-	jobID, err := s.mgr.StartJob(req.Command, opts)
+	jobID, err := s.Manager.Start(req.Command, req.Args)
 	if err != nil {
-		return nil, err
+		log.Printf("StartJob error: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to start job: %v", err)
 	}
-	return &pb.StartJobResponse{JobId: jobID}, nil
+	return &pb.JobStartResponse{JobId: jobID}, nil
 }
 
-func (s *jobServiceServer) StopJob(ctx context.Context, req *pb.StopJobRequest) (*pb.StopJobResponse, error) {
-	if err := s.mgr.StopJob(req.JobId); err != nil {
-		return nil, err
+func (s *Server) StopJob(ctx context.Context, req *pb.JobIDRequest) (*pb.JobStopResponse, error) {
+	if err := s.Manager.Stop(req.JobId); err != nil {
+		return nil, status.Errorf(codes.NotFound, "failed to stop job: %v", err)
 	}
-	return &pb.StopJobResponse{Success: true}, nil
+	return &pb.JobStopResponse{}, nil
 }
 
-func (s *jobServiceServer) GetJobStatus(ctx context.Context, req *pb.JobStatusRequest) (*pb.JobStatusResponse, error) {
-	status, exitCode, err := s.mgr.GetStatus(req.JobId)
+func (s *Server) GetStatus(ctx context.Context, req *pb.JobIDRequest) (*pb.JobStatusResponse, error) {
+	state, exitCode, errMsg, err := s.Manager.Status(req.JobId)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.NotFound, "job not found: %v", err)
+	}
+	var pbStatus pb.Status
+	switch state {
+	case job.StateRunning:
+		pbStatus = pb.Status_STATUS_RUNNING
+	case job.StateCompleted:
+		pbStatus = pb.Status_STATUS_COMPLETED
+	case job.StateCancelled:
+		pbStatus = pb.Status_STATUS_CANCELLED
+	case job.StateFailed:
+		pbStatus = pb.Status_STATUS_FAILED
+	default:
+		pbStatus = pb.Status_STATUS_UNKNOWN
 	}
 	return &pb.JobStatusResponse{
-		JobId:    req.JobId,
-		Status:   status.String(),
-		ExitCode: int32(exitCode),
+		JobId:        req.JobId,
+		Status:       pbStatus,
+		ExitCode:     int32(exitCode),
+		ErrorMessage: errMsg,
 	}, nil
 }
 
-func (s *jobServiceServer) StreamOutput(req *pb.JobOutputRequest, stream pb.JobService_StreamOutputServer) error {
-	j, ok := s.mgr.GetJob(req.JobId)
+func (s *Server) StreamOutput(req *pb.JobOutputRequest, stream pb.JobService_StreamOutputServer) error {
+	jobObj, ok := s.Manager.GetJob(req.JobId)
 	if !ok {
-		return fmt.Errorf("job not found")
+		return status.Errorf(codes.NotFound, "job not found")
 	}
-	sub := j.Subscribe()
-	for chunk := range sub {
-		if err := stream.Send(&pb.JobOutputChunk{Data: chunk}); err != nil {
-			return err
+	sub := jobObj.Subscribe()
+	// Loop indefinitely, sending new output as it arrives.
+	for {
+		select {
+		case line, ok := <-sub:
+			if !ok {
+				// Channel closed: job finished.
+				return nil
+			}
+			if err := stream.Send(&pb.JobOutputChunk{Data: []byte(line)}); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return stream.Context().Err()
 		}
 	}
-	return nil
 }

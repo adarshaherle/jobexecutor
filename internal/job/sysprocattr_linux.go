@@ -5,9 +5,9 @@ package job
 
 import "syscall"
 
-// getSysProcAttr returns a pointer to syscall.SysProcAttr configured with namespace flags.
+// getSysProcAttr returns Linux namespace flags using cgroup and namespace isolation.
 func getSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET,
-	}
+    return &syscall.SysProcAttr{
+        Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET,
+    }
 }

@@ -1,72 +1,60 @@
 syntax = "proto3";
 
-package jobexecutor;
+package job;
 
-option go_package = "github.com/adarshaherle/jobexecutor/proto";
+// Specify the Go package for generated code with alias "jobpb".
+option go_package = "github.com/adarshaherle/jobexecutor/proto;jobpb";
 
-// JobOptions for resource limits.
-message JobOptions {
-  int32 cpuLimit = 1;
-  int32 memoryLimitMb = 2;
-  int32 diskIOLimitBps = 3;
+// Enum for job status.
+enum Status {
+    STATUS_UNKNOWN = 0;
+    STATUS_RUNNING = 1;
+    STATUS_COMPLETED = 2;
+    STATUS_FAILED = 3;
+    STATUS_CANCELLED = 4;
 }
 
 // Request to start a job.
-message StartJobRequest {
-  repeated string command = 1;
-  JobOptions options = 2;
+message JobStartRequest {
+    string command = 1;
+    repeated string args = 2;
 }
 
-// Response after starting a job.
-message StartJobResponse {
-  string jobId = 1;
+// Response from StartJob.
+message JobStartResponse {
+    string job_id = 1;
 }
 
-// Request to stop a job.
-message StopJobRequest {
-  string jobId = 1;
+// Request by job ID.
+message JobIDRequest {
+    string job_id = 1;
 }
 
-// Response after stopping a job.
-message StopJobResponse {
-  bool success = 1;
-}
+// Response for StopJob.
+message JobStopResponse {}
 
-// Request for job status.
-message JobStatusRequest {
-  string jobId = 1;
-}
-
-// Response for job status.
+// Response for GetStatus.
 message JobStatusResponse {
-  string jobId = 1;
-  string status = 2;
-  int32 exitCode = 3;
-}
-
-// Request to list all jobs.
-message ListJobsRequest {}
-
-// Response for listing all jobs.
-message ListJobsResponse {
-  repeated JobStatusResponse jobs = 1;
+    string job_id = 1;
+    Status status = 2;
+    int32 exit_code = 3;
+    string error_message = 4;
 }
 
 // Request to stream job output.
 message JobOutputRequest {
-  string jobId = 1;
+    string job_id = 1;
 }
 
-// A chunk of job output.
+// Output chunk message.
 message JobOutputChunk {
-  bytes data = 1;
+    bytes data = 1;
 }
 
 // The JobService definition.
 service JobService {
-  rpc StartJob(StartJobRequest) returns (StartJobResponse);
-  rpc StopJob(StopJobRequest) returns (StopJobResponse);
-  rpc GetJobStatus(JobStatusRequest) returns (JobStatusResponse);
-  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
-  rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
+    rpc StartJob(JobStartRequest) returns (JobStartResponse);
+    rpc StopJob(JobIDRequest) returns (JobStopResponse);
+    rpc GetStatus(JobIDRequest) returns (JobStatusResponse);
+    rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
 }

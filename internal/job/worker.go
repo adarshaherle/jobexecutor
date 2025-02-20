@@ -1,272 +1,250 @@
 package job
 
 import (
-	"bytes"
-	"context"
+	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"sync"
-	"time"
+
 )
 
-// JobStatus represents the state of a job.
-type JobStatus int
+// JobState represents the current state of a job.
+type JobState int
 
 const (
-	StatusPending JobStatus = iota
-	StatusRunning
-	StatusCompleted
-	StatusStopped
-	StatusFailed
+	StateRunning JobState = iota
+	StateCompleted
+	StateFailed
+	StateCancelled
 )
 
-func (s JobStatus) String() string {
+func (s JobState) String() string {
 	switch s {
-	case StatusPending:
-		return "pending"
-	case StatusRunning:
+	case StateRunning:
 		return "running"
-	case StatusCompleted:
+	case StateCompleted:
 		return "completed"
-	case StatusStopped:
-		return "stopped"
-	case StatusFailed:
+	case StateFailed:
 		return "failed"
+	case StateCancelled:
+		return "cancelled"
 	default:
 		return "unknown"
 	}
 }
 
-// JobOptions holds resource limits for a job.
-type JobOptions struct {
-	CPULimit    int // CPU quota in microseconds per period (e.g. 50000 for 50%)
-	MemoryLimit int // Memory limit in MB
-	DiskIOLimit int // Disk I/O limit in bytes per second (simplified)
-}
-
-// Job represents a process running as a job.
+// Job holds information about a job.
 type Job struct {
-	ID      string
-	Command []string
-	Status  JobStatus
-	Output  bytes.Buffer
+	ID       string
+	Cmd      *exec.Cmd
+	State    JobState
+	ExitCode int
+	Err      error
 
-	exitCode   int
-	startedAt  time.Time
-	finishedAt time.Time
+	outputMu   sync.Mutex
+	outputCond *sync.Cond
+	// We'll store output lines.
+	OutputBuf []string
 
-	cmd        *exec.Cmd
-	cancelFunc context.CancelFunc
-
-	subscribers []chan []byte
+	// Subscribers for real‑time output.
 	subMu       sync.Mutex
-
-	mu sync.Mutex
+	subscribers []chan string
 }
 
-// Subscribe returns a channel for streaming output.
-func (j *Job) Subscribe() chan []byte {
-	ch := make(chan []byte, 100)
-	j.subMu.Lock()
-	j.subscribers = append(j.subscribers, ch)
-	j.subMu.Unlock()
+func newJob(id string, cmd *exec.Cmd) *Job {
+	job := &Job{
+		ID:        id,
+		Cmd:       cmd,
+		State:     StateRunning,
+		OutputBuf: make([]string, 0),
+	}
+	job.outputCond = sync.NewCond(&job.outputMu)
+	return job
+}
 
-	// Send already buffered output.
-	go func() {
-		j.mu.Lock()
-		data := j.Output.Bytes()
-		j.mu.Unlock()
-		if len(data) > 0 {
-			ch <- data
+// appendOutput appends a line to the buffer and notifies subscribers.
+func (j *Job) appendOutput(line string) {
+	j.outputMu.Lock()
+	j.OutputBuf = append(j.OutputBuf, line)
+	j.outputCond.Broadcast()
+	j.outputMu.Unlock()
+
+	j.subMu.Lock()
+	for _, sub := range j.subscribers {
+		// Non-blocking send.
+		select {
+		case sub <- line:
+		default:
 		}
-	}()
+	}
+	j.subMu.Unlock()
+}
+
+// Subscribe returns a channel that receives new output lines.
+func (j *Job) Subscribe() <-chan string {
+	j.subMu.Lock()
+	defer j.subMu.Unlock()
+	ch := make(chan string, 100)
+	// Optionally, send already buffered output.
+	j.outputMu.Lock()
+	for _, line := range j.OutputBuf {
+		ch <- line
+	}
+	j.outputMu.Unlock()
+	j.subscribers = append(j.subscribers, ch)
 	return ch
 }
 
-func (j *Job) broadcastOutput(data []byte) {
-	j.subMu.Lock()
-	defer j.subMu.Unlock()
-	for _, ch := range j.subscribers {
-		select {
-		case ch <- data:
-		default:
-			// Skip if channel is full.
-		}
-	}
+// GetOutput returns all buffered output as a single string.
+func (j *Job) GetOutput() string {
+	j.outputMu.Lock()
+	defer j.outputMu.Unlock()
+	return fmt.Sprint(j.OutputBuf)
 }
 
-func (j *Job) closeSubscribers() {
+// finish updates the job state and closes subscriber channels.
+func (j *Job) finish(exitCode int, err error) {
+	j.outputMu.Lock()
+	if err != nil {
+		j.State = StateFailed
+	} else {
+		j.State = StateCompleted
+	}
+	j.ExitCode = exitCode
+	j.Err = err
+	j.outputCond.Broadcast()
+	j.outputMu.Unlock()
+
 	j.subMu.Lock()
-	defer j.subMu.Unlock()
 	for _, ch := range j.subscribers {
 		close(ch)
 	}
 	j.subscribers = nil
+	j.subMu.Unlock()
 }
 
-func (j *Job) captureOutput(pipe io.ReadCloser) {
-	defer pipe.Close()
-	buf := make([]byte, 1024)
-	for {
-		n, err := pipe.Read(buf)
-		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			j.mu.Lock()
-			j.Output.Write(data)
-			j.mu.Unlock()
-			j.broadcastOutput(data)
-		}
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			break
-		}
-	}
+// JobManager manages jobs.
+type JobManager struct {
+	mu     sync.Mutex
+	jobs   map[string]*Job
+	nextID int
 }
 
-// Manager manages jobs.
-type Manager struct {
-	mu   sync.Mutex
-	jobs map[string]*Job
+func NewJobManager() *JobManager {
+	return &JobManager{jobs: make(map[string]*Job)}
 }
 
-// NewManager creates a new Manager instance.
-func NewManager() *Manager {
-	return &Manager{jobs: make(map[string]*Job)}
-}
-
-// GetJob returns the job with the given ID.
-func (m *Manager) GetJob(jobID string) (*Job, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	job, ok := m.jobs[jobID]
-	return job, ok
-}
-
-// generateJobID returns a pseudo-unique job ID.
-func generateJobID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-// StartJob starts a new process with the given command and options.
-func (m *Manager) StartJob(command []string, opts JobOptions) (string, error) {
-	if len(command) == 0 {
+// Start launches a new job.
+func (m *JobManager) Start(command string, args []string) (string, error) {
+	if command == "" {
 		return "", fmt.Errorf("command cannot be empty")
 	}
+	cmd := exec.Command(command, args...)
+	cmd.SysProcAttr = getSysProcAttr()
 
-	jobID := generateJobID()
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a pipe to capture output.
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
-	job := &Job{
-		ID:          jobID,
-		Command:     command,
-		Status:      StatusPending,
-		cancelFunc:  cancel,
-		subscribers: []chan []byte{},
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start command: %w", err)
 	}
+
 	m.mu.Lock()
+	jobID := fmt.Sprintf("job-%d", m.nextID)
+	m.nextID++
+	job := newJob(jobID, cmd)
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Set up the command with namespace isolation if available.
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	// Use our helper function to get platform-specific SysProcAttr.
-	cmd.SysProcAttr = getSysProcAttr()
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to get stdout pipe: %w", err)
+	// Apply cgroup limits (if enabled).
+	limits := ResourceLimits{
+		CPUQuotaPercent:  50,
+		MemoryLimitBytes: 100 * 1024 * 1024,
+		BlockIOWeight:    500,
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to get stderr pipe: %w", err)
-	}
-	job.cmd = cmd
-
-	if err := cmd.Start(); err != nil {
-		job.Status = StatusFailed
-		return "", fmt.Errorf("failed to start command: %w", err)
-	}
-	job.Status = StatusRunning
-	job.startedAt = time.Now()
-
-	// Set up cgroups for resource control.
-	if err := SetupCgroup(jobID, opts.CPULimit, opts.MemoryLimit, opts.DiskIOLimit, cmd.Process.Pid); err != nil {
-		_ = cmd.Process.Kill()
-		return "", fmt.Errorf("failed to set up cgroup: %w", err)
+	if err := ApplyCgroupLimits(jobID, cmd.Process.Pid, limits); err != nil {
+		log.Printf("Warning: cgroup limits not applied: %v", err)
 	}
 
-	go job.captureOutput(stdoutPipe)
-	go job.captureOutput(stderrPipe)
+	// Use a scanner to read output continuously.
 	go func(j *Job) {
-		err := cmd.Wait()
-		j.mu.Lock()
-		j.finishedAt = time.Now()
-		if err != nil {
-			if ctx.Err() != nil {
-				j.Status = StatusStopped
-			} else {
-				j.Status = StatusFailed
-			}
-		} else {
-			j.Status = StatusCompleted
-			j.exitCode = cmd.ProcessState.ExitCode()
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			j.appendOutput(line)
 		}
-		j.mu.Unlock()
-		j.closeSubscribers()
-		_ = CleanupCgroup(jobID)
+		if err := scanner.Err(); err != nil {
+			log.Printf("Error reading output for job %s: %v", jobID, err)
+		}
+
+		// Wait for the command to finish.
+		err := cmd.Wait()
+		exitCode := 0
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				exitCode = ee.ExitCode()
+			} else {
+				exitCode = -1
+			}
+		}
+		j.finish(exitCode, err)
+		// Close the writer end.
+		pw.Close()
 	}(job)
 
 	return jobID, nil
 }
 
-// StopJob stops a running job.
-func (m *Manager) StopJob(jobID string) error {
+// Stop terminates a running job.
+func (m *JobManager) Stop(jobID string) error {
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
 	m.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("job not found")
+		return fmt.Errorf("job %s not found", jobID)
 	}
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	if job.Status != StatusRunning {
-		return fmt.Errorf("job is not running")
+	if job.Cmd.Process == nil {
+		return fmt.Errorf("no process found for job %s", jobID)
 	}
-	job.cancelFunc()
-	if job.cmd != nil && job.cmd.Process != nil {
-		if err := job.cmd.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill process: %w", err)
-		}
-	}
-	return nil
+	return job.Cmd.Process.Kill()
 }
 
-// GetStatus returns the current status and exit code of a job.
-func (m *Manager) GetStatus(jobID string) (JobStatus, int, error) {
+// Status returns the current state of a job.
+func (m *JobManager) Status(jobID string) (JobState, int, string, error) {
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
 	m.mu.Unlock()
 	if !ok {
-		return StatusFailed, -1, fmt.Errorf("job not found")
+		return 0, -1, "", fmt.Errorf("job %s not found", jobID)
 	}
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return job.Status, job.exitCode, nil
+	job.outputMu.Lock()
+	defer job.outputMu.Unlock()
+	errMsg := ""
+	if job.Err != nil {
+		errMsg = job.Err.Error()
+	}
+	return job.State, job.ExitCode, errMsg, nil
 }
 
-// GetOutput returns the accumulated output from a job.
-func (m *Manager) GetOutput(jobID string) (string, error) {
+// GetOutput returns the complete output of a job.
+func (m *JobManager) GetOutput(jobID string) (string, error) {
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
 	m.mu.Unlock()
 	if !ok {
-		return "", fmt.Errorf("job not found")
+		return "", fmt.Errorf("job %s not found", jobID)
 	}
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return job.Output.String(), nil
+	return job.GetOutput(), nil
+}
+
+// GetJob returns the job pointer.
+func (m *JobManager) GetJob(jobID string) (*Job, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[jobID]
+	return job, ok
 }

@@ -4,7 +4,7 @@
 // - protoc             v5.29.3
 // source: job.proto
 
-package proto
+package jobpb
 
 import (
 	context "context"
@@ -19,11 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	JobService_StartJob_FullMethodName     = "/jobexecutor.JobService/StartJob"
-	JobService_StopJob_FullMethodName      = "/jobexecutor.JobService/StopJob"
-	JobService_GetJobStatus_FullMethodName = "/jobexecutor.JobService/GetJobStatus"
-	JobService_ListJobs_FullMethodName     = "/jobexecutor.JobService/ListJobs"
-	JobService_StreamOutput_FullMethodName = "/jobexecutor.JobService/StreamOutput"
+	JobService_StartJob_FullMethodName     = "/job.JobService/StartJob"
+	JobService_StopJob_FullMethodName      = "/job.JobService/StopJob"
+	JobService_GetStatus_FullMethodName    = "/job.JobService/GetStatus"
+	JobService_StreamOutput_FullMethodName = "/job.JobService/StreamOutput"
 )
 
 // JobServiceClient is the client API for JobService service.
@@ -32,10 +31,9 @@ const (
 //
 // The JobService definition.
 type JobServiceClient interface {
-	StartJob(ctx context.Context, in *StartJobRequest, opts ...grpc.CallOption) (*StartJobResponse, error)
-	StopJob(ctx context.Context, in *StopJobRequest, opts ...grpc.CallOption) (*StopJobResponse, error)
-	GetJobStatus(ctx context.Context, in *JobStatusRequest, opts ...grpc.CallOption) (*JobStatusResponse, error)
-	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
+	StartJob(ctx context.Context, in *JobStartRequest, opts ...grpc.CallOption) (*JobStartResponse, error)
+	StopJob(ctx context.Context, in *JobIDRequest, opts ...grpc.CallOption) (*JobStopResponse, error)
+	GetStatus(ctx context.Context, in *JobIDRequest, opts ...grpc.CallOption) (*JobStatusResponse, error)
 	StreamOutput(ctx context.Context, in *JobOutputRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[JobOutputChunk], error)
 }
 
@@ -47,9 +45,9 @@ func NewJobServiceClient(cc grpc.ClientConnInterface) JobServiceClient {
 	return &jobServiceClient{cc}
 }
 
-func (c *jobServiceClient) StartJob(ctx context.Context, in *StartJobRequest, opts ...grpc.CallOption) (*StartJobResponse, error) {
+func (c *jobServiceClient) StartJob(ctx context.Context, in *JobStartRequest, opts ...grpc.CallOption) (*JobStartResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StartJobResponse)
+	out := new(JobStartResponse)
 	err := c.cc.Invoke(ctx, JobService_StartJob_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -57,9 +55,9 @@ func (c *jobServiceClient) StartJob(ctx context.Context, in *StartJobRequest, op
 	return out, nil
 }
 
-func (c *jobServiceClient) StopJob(ctx context.Context, in *StopJobRequest, opts ...grpc.CallOption) (*StopJobResponse, error) {
+func (c *jobServiceClient) StopJob(ctx context.Context, in *JobIDRequest, opts ...grpc.CallOption) (*JobStopResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StopJobResponse)
+	out := new(JobStopResponse)
 	err := c.cc.Invoke(ctx, JobService_StopJob_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -67,20 +65,10 @@ func (c *jobServiceClient) StopJob(ctx context.Context, in *StopJobRequest, opts
 	return out, nil
 }
 
-func (c *jobServiceClient) GetJobStatus(ctx context.Context, in *JobStatusRequest, opts ...grpc.CallOption) (*JobStatusResponse, error) {
+func (c *jobServiceClient) GetStatus(ctx context.Context, in *JobIDRequest, opts ...grpc.CallOption) (*JobStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(JobStatusResponse)
-	err := c.cc.Invoke(ctx, JobService_GetJobStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *jobServiceClient) ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListJobsResponse)
-	err := c.cc.Invoke(ctx, JobService_ListJobs_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, JobService_GetStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -112,10 +100,9 @@ type JobService_StreamOutputClient = grpc.ServerStreamingClient[JobOutputChunk]
 //
 // The JobService definition.
 type JobServiceServer interface {
-	StartJob(context.Context, *StartJobRequest) (*StartJobResponse, error)
-	StopJob(context.Context, *StopJobRequest) (*StopJobResponse, error)
-	GetJobStatus(context.Context, *JobStatusRequest) (*JobStatusResponse, error)
-	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
+	StartJob(context.Context, *JobStartRequest) (*JobStartResponse, error)
+	StopJob(context.Context, *JobIDRequest) (*JobStopResponse, error)
+	GetStatus(context.Context, *JobIDRequest) (*JobStatusResponse, error)
 	StreamOutput(*JobOutputRequest, grpc.ServerStreamingServer[JobOutputChunk]) error
 	mustEmbedUnimplementedJobServiceServer()
 }
@@ -127,17 +114,14 @@ type JobServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedJobServiceServer struct{}
 
-func (UnimplementedJobServiceServer) StartJob(context.Context, *StartJobRequest) (*StartJobResponse, error) {
+func (UnimplementedJobServiceServer) StartJob(context.Context, *JobStartRequest) (*JobStartResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartJob not implemented")
 }
-func (UnimplementedJobServiceServer) StopJob(context.Context, *StopJobRequest) (*StopJobResponse, error) {
+func (UnimplementedJobServiceServer) StopJob(context.Context, *JobIDRequest) (*JobStopResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StopJob not implemented")
 }
-func (UnimplementedJobServiceServer) GetJobStatus(context.Context, *JobStatusRequest) (*JobStatusResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetJobStatus not implemented")
-}
-func (UnimplementedJobServiceServer) ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListJobs not implemented")
+func (UnimplementedJobServiceServer) GetStatus(context.Context, *JobIDRequest) (*JobStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStatus not implemented")
 }
 func (UnimplementedJobServiceServer) StreamOutput(*JobOutputRequest, grpc.ServerStreamingServer[JobOutputChunk]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamOutput not implemented")
@@ -164,7 +148,7 @@ func RegisterJobServiceServer(s grpc.ServiceRegistrar, srv JobServiceServer) {
 }
 
 func _JobService_StartJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartJobRequest)
+	in := new(JobStartRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -176,13 +160,13 @@ func _JobService_StartJob_Handler(srv interface{}, ctx context.Context, dec func
 		FullMethod: JobService_StartJob_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).StartJob(ctx, req.(*StartJobRequest))
+		return srv.(JobServiceServer).StartJob(ctx, req.(*JobStartRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _JobService_StopJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StopJobRequest)
+	in := new(JobIDRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -194,43 +178,25 @@ func _JobService_StopJob_Handler(srv interface{}, ctx context.Context, dec func(
 		FullMethod: JobService_StopJob_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).StopJob(ctx, req.(*StopJobRequest))
+		return srv.(JobServiceServer).StopJob(ctx, req.(*JobIDRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _JobService_GetJobStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JobStatusRequest)
+func _JobService_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobIDRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(JobServiceServer).GetJobStatus(ctx, in)
+		return srv.(JobServiceServer).GetStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: JobService_GetJobStatus_FullMethodName,
+		FullMethod: JobService_GetStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).GetJobStatus(ctx, req.(*JobStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _JobService_ListJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListJobsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(JobServiceServer).ListJobs(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: JobService_ListJobs_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).ListJobs(ctx, req.(*ListJobsRequest))
+		return srv.(JobServiceServer).GetStatus(ctx, req.(*JobIDRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -250,7 +216,7 @@ type JobService_StreamOutputServer = grpc.ServerStreamingServer[JobOutputChunk]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var JobService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "jobexecutor.JobService",
+	ServiceName: "job.JobService",
 	HandlerType: (*JobServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -262,12 +228,8 @@ var JobService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _JobService_StopJob_Handler,
 		},
 		{
-			MethodName: "GetJobStatus",
-			Handler:    _JobService_GetJobStatus_Handler,
-		},
-		{
-			MethodName: "ListJobs",
-			Handler:    _JobService_ListJobs_Handler,
+			MethodName: "GetStatus",
+			Handler:    _JobService_GetStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
