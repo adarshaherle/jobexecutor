@@ -229,29 +229,58 @@ service JobService {
 
 ## Resource Isolation with Cgroups v2
 
+  
+
 Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memory, and disk I/O, ensuring controlled execution.
 
-### Execution Flow
+  
+
+When you start a job, the executor follows these steps to isolate resources:
 
   
 
--  **Cgroup Creation**: A unique cgroup is created for each job under `/sys/fs/cgroup/jobexec/<job_id>`.
+1.  **Create Job Cgroup**:
+
+	- Create a unique sub-cgroup under the executor’s cgroup path (e.g., `/sys/fs/cgroup/executor/<job-id>`).
+
+	- Enable necessary controllers (CPU, memory, I/O) in the parent’s `cgroup.subtree_control`.
+
+2.  **Apply Resource Limits**:
+
+	-  **CPU**: Set limits in `cpu.max` using quota and period to enforce hard CPU caps.
+
+	-  **Memory**: Set maximum allowed memory in `memory.max`; exceeding this limit triggers an OOM (Out-of-Memory) kill.
+
+	-  **Disk I/O**: Define absolute read/write throughput limits in `io.max` for specific devices.
+
+3.  **Launch Job Process**:
+
+	- Start the job process using standard fork/exec.
+
+	- The process initially inherits the executor's default cgroup.
+
+4.  **Assign Process to Cgroup**:
+
+	- Immediately move the job process into the newly created cgroup by writing its PID into `cgroup.procs`.
+
+	- Child processes automatically inherit this cgroup.
+
+5.  **Enforce Limits During Execution**:
+
+	- CPU usage is throttled by the kernel if it exceeds the configured limits.
+
+	- Memory allocations are monitored, and excessive usage triggers OOM kills.
+
+	- Disk I/O operations are throttled to ensure they remain within defined limits.
+
+6.  **Cleanup After Job Completion**:
+
+	- After the job ends, the executor cleans up by removing the job’s cgroup directory.
+
+	- Optionally, log resource usage statistics before cleanup.
 
   
-
--  **Process Association**: The job's PID is assigned to `cgroup.procs`, isolating it and its child processes.
-
-  
-
--  **Resource Limits Applied**:
-
-	-	**CPU**: `cpu.max` restricts CPU allocation.
-
-   -	**Memory**: `memory.max` sets a memory ceiling.
-
-   -	**Disk I/O**: `io.max` throttles disk operations.
-
-  
+This process ensures each job runs within isolated resource constraints, maintaining system stability and preventing interference between jobs.
 
 ### Behavior & Flexibility
 
@@ -264,6 +293,7 @@ Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memor
   
 
 This mechanism ensures jobs operate within defined limits, preventing resource contention across the system. &#x20;
+  
 
 ## Security: mTLS Authentication and Authorization
 
