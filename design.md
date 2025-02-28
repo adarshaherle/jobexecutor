@@ -114,75 +114,47 @@ The proposed design will employ a client-server architecture:
 
   
 
-## **Job Lifecycle Management**
+## Job Lifecycle Management
 
 Efficient job lifecycle management ensures seamless execution, monitoring, and termination of tasks, maintaining reliability and consistency.
 
 **Starting a Job**
 
--  **Initiation**: Clients initiate jobs via the `StartJob` RPC.
-
--  **Execution**: The server launches the specified command using `exec.Command`.
-
--  **Identification**: A unique Job ID is generated and returned for future reference.
-
--  **Output Handling**: Standard output and error are captured and managed.
-
--  **Tracking**: Jobs are stored in a thread-safe, in-memory structure.
-
-  
+-   **Initiation**: Clients initiate jobs via the `StartJob` RPC.
+-   **Execution**: The server launches the specified command using `exec.Command`.
+-   **Identification**: A unique Job ID is generated and returned for future reference.
+-   **Output Handling**: Standard output and error are captured and managed.
+-   **Tracking**: Jobs are inserted into a global map (key: Job ID, value: Job details) protected by a mutex, ensuring thread-safe operations.
 
 **Monitoring Job Status**
 
--  **Status Tracking**: The job manager monitors each job's state.
-
--  **Transitions**:
-
-	  -	*Queued* → *Running*: Execution begins.
-
-	 -	*Running* → *Completed*: Successful completion.
-
-	  -	*Running* → *Failed*: Error occurred.
-
-	 -	Running* → *Cancelled*: User-initiated termination.
-
-  
-
--  **Client Queries**: Status can be checked via the `GetStatus` RPC.
-
--  **Persistence**: Completed jobs remain in memory until a server restart.
-
-  
+-   **Status Tracking**: The global map tracks each job's state, allowing efficient updates and retrieval.
+-   **Transitions**:
+    -   Queued → Running: Execution begins.
+    -   Running → Completed: Successful completion.
+    -   Running → Failed: Error occurred.
+    -   Running → Cancelled: User-initiated termination.
+-   **Client Queries**: Status can be checked via the `GetStatus` RPC.
+-   **Persistence**: Completed jobs remain in memory until a server restart.
 
 **Stopping a Job**
 
--  **Termination Request**: Clients send a `StopJob` RPC with the Job ID.
-
--  **Process Termination**: The server terminates the associated process.
-
--  **Status Update**: The job's status changes to *Cancelled*, and resources are freed.
-
--  **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
-
--  **Concurrency Control**: Locks ensure consistent state updates and prevent deadlocks.
-
-  
+-   **Termination Request**: Clients send a `StopJob` RPC with the Job ID.
+-   **Process Termination**: The server terminates the associated process.
+-   **Status Update**: The job's status is updated to Cancelled in the global map (protected by mutex), and associated resources are freed.
+-   **Removal from Tracking**: The job is removed from the global map upon cancellation.
+-   **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
+-   **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
 
 **Output Capture and Streaming**
 
--  **Capture Mechanism**: Upon job initiation, the system captures stdout and stderr by redirecting them into an in-memory, thread-safe buffer.
-
--  **Streaming to Clients**: Clients can access the captured output via the `StreamOutput` RPC, which provides both historical and real-time data.
-
--  **Handling Late Subscribers**: New subscribers receive the entire buffered output first, followed by live data, ensuring no loss of information.
-
--  **Concurrent Streaming Support**: Multiple clients can stream the same job's output simultaneously, managed through a list of active subscribers and synchronized broadcasting.
-  
+-   **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
+-   **Streaming to Clients**: Clients access the complete buffered output via the `StreamOutput` RPC, receiving both historical data from job start and new data in real-time.
+-   **Handling Late Subscribers**: New clients connecting to the stream first receive all previously captured data before live-streaming resumes.
+-   **Concurrent Streaming Support**: Multiple clients can simultaneously stream a job's output, managed through synchronized broadcasting mechanisms ensuring data consistency and integrity.
+-   **Buffer Management**: Currently, outputs are fully buffered in memory, suitable for typical use cases. Future enhancements could include rolling buffers or disk-based storage to accommodate very large outputs efficiently.
 
 Utilizing `exec.Command` ensures compatibility with native OS process management, while mutex-protected structures maintain robust lifecycle management and thread safety.
-
-  
-
 ## gRPC API
 
   
