@@ -4,9 +4,9 @@
 
   
 
-Authors: Adarsha Raghavendra\
+Authors: Adarsha Raghavendra
 
-Created: 2025-02-27\
+Created: 2025-02-27
 
 Status: Proposed
 
@@ -57,8 +57,6 @@ Job Executor is designed for efficient execution and management of background jo
 -  **Resource Isolation**: Utilizes Linux cgroups to enforce per-job CPU, memory, and I/O limits, preventing system resource monopolization.
 
 -  **Single-Node Operation**: Runs independently without distributed coordination, ensuring simplicity and reliability.
-
--
 
 This design ensures a lightweight yet robust job execution framework, balancing security, performance, and maintainability.
 
@@ -140,13 +138,13 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 
 -  **Transitions**:
 
--  *Queued* → *Running*: Execution begins.
+	  -	*Queued* → *Running*: Execution begins.
 
--  *Running* → *Completed*: Successful completion.
+	 -	*Running* → *Completed*: Successful completion.
 
--  *Running* → *Failed*: Error occurred.
+	  -	*Running* → *Failed*: Error occurred.
 
-- Running* → *Cancelled*: User-initiated termination.
+	 -	Running* → *Cancelled*: User-initiated termination.
 
   
 
@@ -179,9 +177,6 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 -  **Handling Late Subscribers**: New subscribers receive the entire buffered output first, followed by live data, ensuring no loss of information.
 
 -  **Concurrent Streaming Support**: Multiple clients can stream the same job's output simultaneously, managed through a list of active subscribers and synchronized broadcasting.
-
--  **Buffer Management**: While the current implementation stores the entire output in memory, future enhancements may include rolling buffers or disk storage for large outputs.
-
   
 
 Utilizing `exec.Command` ensures compatibility with native OS process management, while mutex-protected structures maintain robust lifecycle management and thread safety.
@@ -209,223 +204,56 @@ The Job Executor exposes a gRPC API to manage job execution remotely. The availa
 **gRPC API Definition (Proto File)**
 
 ```proto
-
-  
-
 syntax = "proto3";
 
-  
-
-  
-
 package job;
-
-  
-
-  
-
 // Enum for job status.
-
-  
-
 enum Status {
-
-  
-
-STATUS_UNKNOWN = 0;
-
-  
-
-STATUS_RUNNING = 1;
-
-  
-
-STATUS_COMPLETED = 2;
-
-  
-
-STATUS_FAILED = 3;
-
-  
-
-STATUS_CANCELLED = 4;
-
-  
-
+    STATUS_UNKNOWN = 0;
+    STATUS_RUNNING = 1;
+    STATUS_COMPLETED = 2;
+    STATUS_FAILED = 3;
+    STATUS_CANCELLED = 4;
 }
-
-  
-
-  
-
 // Request to start a job.
-
-  
-
 message JobStartRequest {
-
-  
-
-string command = 1;
-
-  
-
-repeated string args = 2;
-
-  
-
+    string command = 1;
+    repeated string args = 2;
 }
-
-  
-
-  
-
 // Response from StartJob.
-
-  
-
 message JobStartResponse {
-
-  
-
-string job_id = 1;
-
-  
-
+    string job_id = 1;
 }
-
-  
-
-  
-
 // Request by job ID.
-
-  
-
 message JobIDRequest {
-
-  
-
-string job_id = 1;
-
-  
-
+    string job_id = 1;
 }
-
-  
-
-  
-
 // Response for StopJob.
-
-  
-
 message JobStopResponse {}
-
-  
-
-  
-
 // Response for GetStatus.
-
-  
-
 message JobStatusResponse {
-
-  
-
-string job_id = 1;
-
-  
-
-Status status = 2;
-
-  
-
-int32 exit_code = 3;
-
-  
-
-string error_message = 4;
-
-  
-
+    string job_id = 1;
+    Status status = 2;
+    int32 exit_code = 3;
+    string error_message = 4;
 }
-
-  
-
-  
-
 // Request to stream job output.
-
-  
-
 message JobOutputRequest {
-
-  
-
-string job_id = 1;
-
-  
-
+    string job_id = 1;
 }
-
-  
-
-  
-
 // Output chunk message.
-
-  
-
 message JobOutputChunk {
-
-  
-
-bytes data = 1;
-
-  
-
+    bytes data = 1;
 }
-
-  
-
-  
-
 // The JobService definition.
-
-  
-
 service JobService {
-
-  
-
-rpc StartJob(JobStartRequest) returns (JobStartResponse);
-
-  
-
-rpc StopJob(JobIDRequest) returns (JobStopResponse);
-
-  
-
-rpc GetStatus(JobIDRequest) returns (JobStatusResponse);
-
-  
-
-rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
-
-  
-
+    rpc StartJob(JobStartRequest) returns (JobStartResponse);
+    rpc StopJob(JobIDRequest) returns (JobStopResponse);
+    rpc GetStatus(JobIDRequest) returns (JobStatusResponse);
+    rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
 }
-
-  
-
 ```
-
-###
-
-  
-  
+ 
 
 ## Resource Isolation with Cgroups v2
 
@@ -435,7 +263,7 @@ Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memor
 
   
 
--  **Cgroup Creation**: A unique cgroup is created for each job under `/sys/fs/cgroup/jobexecutor/<job_id>`.
+-  **Cgroup Creation**: A unique cgroup is created for each job under `/sys/fs/cgroup/jobexec/<job_id>`.
 
   
 
@@ -445,11 +273,11 @@ Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memor
 
 -  **Resource Limits Applied**:
 
--  **CPU**: `cpu.max` restricts CPU allocation.
+	-	**CPU**: `cpu.max` restricts CPU allocation.
 
--  **Memory**: `memory.max` sets a memory ceiling.
+   -	**Memory**: `memory.max` sets a memory ceiling.
 
--  **Disk I/O**: `io.max` throttles disk operations.
+   -	**Disk I/O**: `io.max` throttles disk operations.
 
   
 
@@ -499,17 +327,17 @@ This approach ensures that communication between clients and the Job Executor se
 
 ## CLI Tool and User Experience
 
-The Job Executor provides a command-line interface (CLI) tool, `jobexecutor`, built using the Cobra library. This CLI tool serves as a client for the gRPC API, enabling users to manage job execution seamlessly.
+The Job Executor provides a command-line interface (CLI) tool, `jobexec`, built using the Cobra library. This CLI tool serves as a client for the gRPC API, enabling users to manage job execution seamlessly.
 
 ### Commands
 
--  **`jobexecutor start <cmd> [args...]`** – Submits a new job request via `StartJob` RPC and returns a unique Job ID upon success.
+-  **`jobexec start <cmd> [args...]`** – Submits a new job request via `StartJob` RPC and returns a unique Job ID upon success.
 
--  **`jobexecutor status <job-id>`** – Queries job status using `GetStatus` RPC, displaying the current state and exit code if the job has finished.
+-  **`jobexec status <job-id>`** – Queries job status using `GetStatus` RPC, displaying the current state and exit code if the job has finished.
 
--  **`jobexecutor stop <job-id>`** – Sends a termination request via `StopJob` RPC to cancel an active job.
+-  **`jobexec stop <job-id>`** – Sends a termination request via `StopJob` RPC to cancel an active job.
 
--  **`jobexecutor logs <job-id>`** – Streams job output in real-time using `StreamOutput` RPC, displaying both historical and live logs until job completion or user interruption.
+-  **`jobexec logs <job-id>`** – Streams job output in real-time using `StreamOutput` RPC, displaying both historical and live logs until job completion or user interruption.
 
   
 
@@ -519,7 +347,7 @@ The Job Executor provides a command-line interface (CLI) tool, `jobexecutor`, bu
 
 -  **`--verbose`** – Enables detailed logging for debugging purposes.
 
-Under the hood, the CLI tool will be configured to load the necessary TLS certificates (via flags or environment variables) to establish a secure mTLS connection to the server.The design proposes a CLI tool (referred to as the jobexecutor command) to be built using the Cobra library. This planned tool will serve as a client for the gRPC API, enabling users to interact with the Job Executor server.
+Under the hood, the CLI tool will be configured to load the necessary TLS certificates (via flags or environment variables) to establish a secure mTLS connection to the server.The design proposes a CLI tool (referred to as the jobexec command) to be built using the Cobra library. This planned tool will serve as a client for the gRPC API, enabling users to interact with the Job Executor server.
 
 ## Testing and Reliability Considerations
 
@@ -539,18 +367,19 @@ The test plan ensures reliable operation of the Job Executor:
 
 ## Trade-offs
 
--  **Persistence vs Performance**: Polling a database at frequent intervals introduces load and latency but ensures reliability and simplicity. Future optimizations may involve push-based queues or adaptive polling intervals.
+During the design of Job Executor, several trade-offs were made to keep the system simple and focused. This section outlines the key limitations and decisions, and the reasoning behind them:
 
--  **Horizontal Scalability**: Running multiple executors improves resilience but requires careful coordination to avoid duplicate job claims.
+-   **In-Memory Storage:** Job definitions and statuses are kept in memory, eliminating the need for a database. This simplifies deployment and speeds development but means data is lost on service restarts and can't be shared between instances.
+    
+-   **No Caching:** Every request reads fresh from memory. While adequate for small loads, it may lead to inefficiencies if operations become costly at scale.
+    
+-   **Basic Concurrency:** Job execution uses simple concurrency controls (e.g., semaphores) without a sophisticated worker pool. This limits dynamic scaling and persistence of queued jobs.
+    
+-   **Immediate Execution:** Jobs run as soon as a slot is available, with no built-in scheduling for future execution.
+    
+-   **Security Trade-off:** mTLS ensures strong security but lacks granular access controls (like RBAC or API tokens), treating all authenticated clients equally.
+    
+-   **Limited Features:** Missing capabilities such as automatic retries, dependency management, and multi-node distribution restrict the system to simple, controlled environments.
+    
 
--  **Job Isolation**: Running jobs within the executor process is efficient but poses risks of crashes or memory leaks affecting the entire service.
-
--  **Failure Recovery**: Lock timeouts allow recovery of stuck jobs, but they introduce a potential delay in job resumption and possible duplicate execution.
-
-## Future Enhancements
-
--  **Persistent Job State**: Migrating from in-memory storage to an external database for scalability and recovery.
-
--  **Dynamic Resource Management**: Implementing more granular and dynamic resource controls.
-
--  **Enhanced Process Isolation**: Integrating additional namespaces (PID, mount, network) for improved security.
+Overall, the design emphasizes simplicity and rapid development, making it suitable for development, demos, or prototyping, while requiring additional enhancements for production use.
