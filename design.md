@@ -297,35 +297,53 @@ This mechanism ensures jobs operate within defined limits, preventing resource c
 
 ## Security: mTLS Authentication and Authorization
 
-Security is a cornerstone of the Job Executor design. The server enforces mutual TLS (mTLS) for all client connections, ensuring secure and authenticated communication. Both the server and client use X.509 certificates to verify each other’s identity, preventing unauthorized access.
+Security in Job Executor relies on mutual TLS (mTLS), where both client and server authenticate each other using X.509 certificates signed by a trusted shared Certificate Authority (CA).
 
-### Authentication
+### Authentication and Granular Authorization
 
-- The gRPC server is configured to require client authentication with a trusted certificate authority (CA).
+-   Clients authenticate with an X.509 certificate, which includes a unique identifier in the **Common Name (CN)** field.
+-   Upon successful authentication, the server extracts the CN from the client's certificate and associates it with jobs submitted by that user.
+-   Users are restricted to interacting exclusively with their own jobs based on the CN, effectively preventing unauthorized access to resources owned by others.
 
-- The server certificate, key, and CA certificate must be provided via configuration flags (`--cert`, `--key`, `--ca`).
+### X.509 Certificate Setup (OpenSSL)
 
-- The CLI client also loads its client certificate and CA certificate to authenticate with the server.
+Certificates are generated and signed using the following OpenSSL commands:
 
-### Authorization
+```bash
+# Generate CA key and certificate
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=JobExec-CA" -out ca.crt
 
-- Authentication is handled at the TLS layer, allowing only clients with valid certificates to connect.
+# Generate Server key and certificate
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -subj "/CN=jobexec.example.com" -out server.csr
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 365 -sha256 -out server.crt
 
-- Currently, authorization is implicit: any authenticated client can invoke RPC methods.
+# Generate Client key and certificate (example for user "alice")
+openssl genrsa -out alice.key 2048
+openssl req -new -key alice.key -subj "/CN=alice" -out alice.csr
+openssl x509 -req -in alice.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 365 -sha256 -out alice.crt
+```
 
-- Future enhancements could restrict access further by validating certificate attributes such as Common Name (CN) against an allowlist.
+Generated Files:
 
-### Secure Configuration
+-   **ca.key / ca.crt**: CA’s private key and self-signed certificate for signing other certificates.
+-   **server.key / server.crt**: Server’s private key and CA-signed certificate.
+-   **alice.key / alice.crt**: Client’s private key and CA-signed certificate uniquely identifying the user "alice."
 
-- The server enforces strong cryptographic defaults, supporting only TLS 1.2 and higher.
+Server and client configurations are set up to mutually trust certificates issued by this shared CA.
 
-- Secure cipher suites are used by default, avoiding weak encryption configurations.
+The server certificate, key, and CA certificate must be provided via configuration flags (`--cert`, `--key`, `--ca`).
 
-- Certificates must be generated using robust cryptographic algorithms such as RSA 4096 or ECC.
+The CLI client also loads its client certificate and CA certificate to authenticate with the server.
 
-  
+### TLS Version Policy
 
-This approach ensures that communication between clients and the Job Executor server remains secure while keeping the authentication mechanism simple and effective.
+-   TLS **1.3 is enforced by default**, providing enhanced security features including faster handshakes, improved encryption algorithms, and better performance.
+-   Cipher suites are explicitly limited to modern and secure options (AES-GCM, ChaCha20-Poly1305).
+-   TLS **1.2 fallback is optional** and generally not recommended unless necessary for compatibility reasons, given that TLS 1.3 is strongly preferred due to its improved security posture.
+
+This approach ensures robust security through strong encryption, precise user-level access controls, and adherence to modern cryptographic standards.
 
 ## CLI Tool and User Experience
 
