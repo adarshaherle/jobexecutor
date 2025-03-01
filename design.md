@@ -347,27 +347,36 @@ This approach ensures robust security through strong encryption, precise user-le
 
 ## CLI Tool and User Experience
 
-The Job Executor provides a command-line interface (CLI) tool, `jobexec`, built using the Cobra library. This CLI tool serves as a client for the gRPC API, enabling users to manage job execution seamlessly.
+The Job Executor includes a user-friendly command-line interface (CLI) tool named `jobexec`, built using the Cobra library. This tool acts as a client interacting with the server's secure gRPC API, enabling users to manage job execution efficiently.
 
 ### Commands
 
--  **`jobexec start <cmd> [args...]`** – Submits a new job request via `StartJob` RPC and returns a unique Job ID upon success.
+- **`jobexec start <cmd> [args...]`**
+  - Initiates a new job via the `StartJob` RPC.
+  - Returns a unique Job ID upon successful submission.
 
--  **`jobexec status <job-id>`** – Queries job status using `GetStatus` RPC, displaying the current state and exit code if the job has finished.
+- **`jobexec status <job-id>`**
+  - Checks job status through the `GetStatus` RPC.
+  - Displays the current job state and exit code (if completed).
 
--  **`jobexec stop <job-id>`** – Sends a termination request via `StopJob` RPC to cancel an active job.
+- **`jobexec stop <job-id>`**
+  - Sends a termination request via the `StopJob` RPC.
+  - The server sends a graceful termination signal (`SIGTERM`), escalating to a forceful kill (`SIGKILL`) if necessary after a timeout.
+  - Updates job status to "Cancelled" and cleans up resources.
 
--  **`jobexec logs <job-id>`** – Streams job output in real-time using `StreamOutput` RPC, displaying both historical and live logs until job completion or user interruption.
-
-  
+- **`jobexec logs <job-id>`**
+  - Streams historical and real-time job output via the `StreamOutput` RPC.
 
 ### Additional Features
 
--  **`--output=json`** – Formats responses as machine-readable JSON for integration with scripts.
+- **`--output=json`**
+  - Outputs responses in JSON format for scripting.
 
--  **`--verbose`** – Enables detailed logging for debugging purposes.
+- **`--verbose`**
+  - Enables detailed logging for debugging.
 
-Under the hood, the CLI tool will be configured to load the necessary TLS certificates (via flags or environment variables) to establish a secure mTLS connection to the server.The design proposes a CLI tool (referred to as the jobexec command) to be built using the Cobra library. This planned tool will serve as a client for the gRPC API, enabling users to interact with the Job Executor server.
+The CLI securely connects to the server via mutual TLS (mTLS) using configured certificates.
+
 
 ## Testing and Reliability Considerations
 
