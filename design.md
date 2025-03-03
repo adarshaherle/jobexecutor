@@ -1,118 +1,65 @@
-  
-
 # RFD 0001 – Proposed Job Executor Design
 
-  
-
 Authors: Adarsha Raghavendra
-
 Created: 2025-02-27
-
 Status: Proposed
-
-  
 
 ## What
 
-  
-
 This document outlines the design and implementation plan for Job Executor, a system for running Linux processes as background jobs. It focuses on process lifecycle management, secure remote control, and resource isolation via Linux cgroups. The gRPC API, secured with mTLS, and a CLI tool facilitate job management. Cgroups enforce CPU, memory, and disk I/O limits, ensuring job isolation and preventing resource overuse.
-
-  
 
 ## Why
 
-  
-
 The Job Executor is designed to provide a secure, efficient, and controlled environment for executing background processes. It ensures:
 
-  
-
 -  **Secure Execution**: Mutual TLS (mTLS) guarantees encrypted communication and verified client-server authentication.
-
 -  **Robust Job Control**: Provides a structured API to start, stop, query, and monitor jobs seamlessly.
-
 -  **Resource Enforcement**: Uses Linux cgroups to contain CPU, memory, and I/O consumption, preventing resource overuse.
-
   
-
 With a focus on simplicity, reliability, and maintainability, the Job Executor ensures seamless job execution while maintaining security, efficiency, and system stability.
-
-  
 
 ## Scope
 
-  
-
 Job Executor is designed for efficient execution and management of background jobs, focusing on security, resource control, and simplicity. It handles:
 
-  
-
 -  **Job Submission**: Accepts commands and assigns a unique Job ID, initiating the job lifecycle from Queued to completion.
-
 -  **State Management**: Tracks job status entirely in memory, transitioning through Queued → Running → Completed/Failed/Canceled.
-
 -  **Process Control**: Runs jobs as external processes, capturing output for monitoring and retrieval.
-
 -  **Resource Isolation**: Utilizes Linux cgroups to enforce per-job CPU, memory, and I/O limits, preventing system resource monopolization.
-
 -  **Single-Node Operation**: Runs independently without distributed coordination, ensuring simplicity and reliability.
 
 This design ensures a lightweight yet robust job execution framework, balancing security, performance, and maintainability.
 
-  
-
 ## Design Approach
-
-  
 
 The service is built with a simple, robust design:
 
 -  **In-Memory Store**: A global map (protected by a mutex) tracks active jobs, ensuring efficient access and updates. The mutex prevents race conditions when modifying job states, allowing safe concurrent execution.
-
 -  **Job Submission**: Accepts commands and assigns a unique Job ID, initiating the job lifecycle from Queued to completion. Before starting, the service checks if a job with the same ID is already running, ensuring job uniqueness and preventing duplicate executions.
-
 -  **Asynchronous Execution**: Jobs are dispatched to worker goroutines that execute the command and capture output.
-
 -  **State Transitions**: Jobs move from Queued to Running, then to Completed, Failed, or Canceled.
-
 -  **Locking**: A global mutex protects shared job state, ensuring thread-safe updates. Each job operation (submission, status update, termination) acquires the lock before modifying the in-memory store, preventing race conditions and maintaining consistency.
-
-  
 
 ## Architecture
 
 The proposed design will employ a client-server architecture:
 
-  
-
 ### Server
 
-  
-
 - Implements core job lifecycle management functions.
-
 - Exposes a gRPC API for job lifecycle operations.
-
 - Enforces resource limits through Linux cgroups.
-
-  
 
 **Server Internal Structure:**
 
 -  **Job Manager Library**: Handles process creation, output capturing, and job state management.
-
 -  **gRPC Service Layer**: Exposes job management functionality over secure connections.
-
 -  **Resource Isolation Layer**: Utilizes Linux cgroups to apply resource limits on a per-job basis.
 
 ### CLI Client
 
 - Provides an interface for users to interact with the server.
-
 - Supports commands such as start, status, stop, and logs.
-
-  
 
 ## Job Lifecycle Management
 
@@ -146,21 +93,6 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 -   **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
 -   **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
 
-
-**Stopping a Job**
-
-- **Termination Request**: Clients send a `StopJob` RPC with the Job ID.
-- **Process Termination**:
-  - **Graceful Termination**: The server sends a `SIGTERM` signal to the process group associated with the job, allowing the process and its child processes to terminate gracefully.
-  - **Forceful Termination**: If the process group does not terminate within a predefined timeout period, the server escalates by sending a `SIGKILL` signal to the entire process group, forcefully terminating the processes.
-- **Status Update**: The job's status is updated to "Cancelled" in the global map (protected by a mutex), and associated resources are freed.
-- **Removal from Tracking**: The job is removed from the global map upon cancellation.
-- **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
-- **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
-
-**Note**: Sending signals to the process group ensures that both the parent process and its child processes receive the termination signals. While `SIGTERM` allows processes to perform cleanup operations, `SIGKILL` forcefully terminates processes without allowing cleanup. It's important to note that `SIGKILL` may not terminate processes that are in an uninterruptible sleep state.
-
-
 **Output Capture and Streaming**
 
 -   **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
@@ -170,24 +102,18 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 -   **Buffer Management**: Currently, outputs are fully buffered in memory, suitable for typical use cases. Future enhancements could include rolling buffers or disk-based storage to accommodate very large outputs efficiently.
 
 Utilizing `exec.Command` ensures compatibility with native OS process management, while mutex-protected structures maintain robust lifecycle management and thread safety.
-## gRPC API
 
-  
+## gRPC API
 
 ### API Overview
 
 The Job Executor exposes a gRPC API to manage job execution remotely. The available methods include:
 
 -  **StartJob**: Initiates a new job and returns a unique Job ID.
-
 -  **GetStatus**: Retrieves the current status and exit code of a job.
-
 -  **StopJob**: Sends a termination signal to a specified job.
-
 -  **StreamOutput**: Streams real-time and historical output from a running job.
-
-  
-
+ 
 **gRPC API Definition (Proto File)**
 
 ```proto
@@ -240,7 +166,6 @@ service JobService {
     rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
 }
 ```
- 
 
 ## Resource Isolation with Cgroups v2
 
@@ -291,11 +216,6 @@ if err := os.WriteFile(cgroupProcsPath, []byte(strconv.Itoa(pid)), 0644); err !=
 - Upon job completion, remove the job’s cgroup directory.
 - Optionally, log resource usage statistics for auditing and troubleshooting.
 
-This revised process ensures robust, secure, and effective resource isolation, maintaining system stability and preventing interference between jobs.
-
-
-
-
 ### Behavior & Flexibility
 
 -  **Linux Enforcement**: Cgroup limits are fully applied.
@@ -303,11 +223,6 @@ This revised process ensures robust, secure, and effective resource isolation, m
 -  **Non-Linux/Disabled Mode**: Uses no-op stubs for development environments without cgroup support.
 
 -  **Graceful Degradation**: If cgroups are unavailable, logs warnings but still executes jobs without restrictions.
-
-  
-
-This mechanism ensures jobs operate within defined limits, preventing resource contention across the system. &#x20;
-  
 
 ## Security: mTLS Authentication and Authorization
 
@@ -357,8 +272,6 @@ The CLI client also loads its client certificate and CA certificate to authentic
 -   Cipher suites are explicitly limited to modern and secure options (AES-GCM, ChaCha20-Poly1305).
 -   TLS **1.2 fallback is optional** and generally not recommended unless necessary for compatibility reasons, given that TLS 1.3 is strongly preferred due to its improved security posture.
 
-This approach ensures robust security through strong encryption, precise user-level access controls, and adherence to modern cryptographic standards.
-
 ## CLI Tool and User Experience
 
 The Job Executor includes a user-friendly command-line interface (CLI) tool named `jobexec`, built using the Cobra library. This tool acts as a client interacting with the server's secure gRPC API, enabling users to manage job execution efficiently.
@@ -391,7 +304,6 @@ The Job Executor includes a user-friendly command-line interface (CLI) tool name
 
 The CLI securely connects to the server via mutual TLS (mTLS) using configured certificates.
 
-
 ## Testing and Reliability Considerations
 
 The test plan ensures reliable operation of the Job Executor:
@@ -423,6 +335,3 @@ During the design of Job Executor, several trade-offs were made to keep the syst
 -   **Security Trade-off:** mTLS ensures strong security but lacks granular access controls (like RBAC or API tokens), treating all authenticated clients equally.
     
 -   **Limited Features:** Missing capabilities such as automatic retries, dependency management, and multi-node distribution restrict the system to simple, controlled environments.
-    
-
-Overall, the design emphasizes simplicity and rapid development, making it suitable for development, demos, or prototyping, while requiring additional enhancements for production use.
