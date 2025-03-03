@@ -22,8 +22,8 @@ With a focus on simplicity, reliability, and maintainability, the Job Executor e
 
 Job Executor is designed for efficient execution and management of background jobs, focusing on security, resource control, and simplicity. It handles:
 
--  **Job Submission**: Accepts commands and assigns a unique Job ID, initiating the job lifecycle from Queued to completion.
--  **State Management**: Tracks job status entirely in memory, transitioning through Queued → Running → Completed/Failed/Canceled.
+-  **Job Submission**: Immediately attempts to run the job and returns either a running job ID or an immediate error if the job cannot start.
+-  **State Management**: Tracks job status entirely in memory, transitioning through Running → Completed/Failed/Canceled.
 -  **Process Control**: Runs jobs as external processes, capturing output for monitoring and retrieval.
 -  **Resource Isolation**: Utilizes Linux cgroups to enforce per-job CPU, memory, and I/O limits, preventing system resource monopolization.
 -  **Single-Node Operation**: Runs independently without distributed coordination, ensuring simplicity and reliability.
@@ -35,9 +35,9 @@ This design ensures a lightweight yet robust job execution framework, balancing 
 The service is built with a simple, robust design:
 
 -  **In-Memory Store**: A global map (protected by a mutex) tracks active jobs, ensuring efficient access and updates. The mutex prevents race conditions when modifying job states, allowing safe concurrent execution.
--  **Job Submission**: Accepts commands and assigns a unique Job ID, initiating the job lifecycle from Queued to completion. Before starting, the service checks if a job with the same ID is already running, ensuring job uniqueness and preventing duplicate executions.
+-  **Job Submission**: Accepts commands and assigns a unique Job ID. The server attempts to launch the specified command immediately, returning either a valid Job ID for a running job or an error describing why the job failed to start.
 -  **Asynchronous Execution**: Jobs are dispatched to worker goroutines that execute the command and capture output.
--  **State Transitions**: Jobs move from Queued to Running, then to Completed, Failed, or Canceled.
+-  **State Transitions**: Jobs immediately enter the Running state and subsequently transition to Completed, Failed, or Cancelled.
 -  **Locking**: A global mutex protects shared job state, ensuring thread-safe updates. Each job operation (submission, status update, termination) acquires the lock before modifying the in-memory store, preventing race conditions and maintaining consistency.
 
 ## Architecture
@@ -77,7 +77,6 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 
 -   **Status Tracking**: The global map tracks each job's state, allowing efficient updates and retrieval.
 -   **Transitions**:
-    -   Queued → Running: Execution begins.
     -   Running → Completed: Successful completion.
     -   Running → Failed: Error occurred.
     -   Running → Cancelled: User-initiated termination.
@@ -328,7 +327,7 @@ During the design of Job Executor, several trade-offs were made to keep the syst
     
 -   **No Caching:** Every request reads fresh from memory. While adequate for small loads, it may lead to inefficiencies if operations become costly at scale.
     
--   **Basic Concurrency:** Job execution uses simple concurrency controls (e.g., semaphores) without a sophisticated worker pool. This limits dynamic scaling and persistence of queued jobs.
+-   **Basic Concurrency:** Job execution uses simple concurrency controls (e.g., semaphores) without a sophisticated worker pool. This limits dynamic scaling and persistence of jobs.
     
 -   **Immediate Execution:** Jobs run as soon as a slot is available, with no built-in scheduling for future execution.
     
