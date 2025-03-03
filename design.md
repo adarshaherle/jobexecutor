@@ -146,6 +146,21 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 -   **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
 -   **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
 
+
+**Stopping a Job**
+
+- **Termination Request**: Clients send a `StopJob` RPC with the Job ID.
+- **Process Termination**:
+  - **Graceful Termination**: The server sends a `SIGTERM` signal to the process group associated with the job, allowing the process and its child processes to terminate gracefully.
+  - **Forceful Termination**: If the process group does not terminate within a predefined timeout period, the server escalates by sending a `SIGKILL` signal to the entire process group, forcefully terminating the processes.
+- **Status Update**: The job's status is updated to "Cancelled" in the global map (protected by a mutex), and associated resources are freed.
+- **Removal from Tracking**: The job is removed from the global map upon cancellation.
+- **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
+- **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
+
+**Note**: Sending signals to the process group ensures that both the parent process and its child processes receive the termination signals. While `SIGTERM` allows processes to perform cleanup operations, `SIGKILL` forcefully terminates processes without allowing cleanup. It's important to note that `SIGKILL` may not terminate processes that are in an uninterruptible sleep state.
+
+
 **Output Capture and Streaming**
 
 -   **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
