@@ -229,58 +229,57 @@ service JobService {
 
 ## Resource Isolation with Cgroups v2
 
-  
-
 Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memory, and disk I/O, ensuring controlled execution.
 
-  
+When you start a job, the executor follows these updated steps to isolate resources:
 
-When you start a job, the executor follows these steps to isolate resources:
+**1. Create Job Cgroup:**
+- Create a unique sub-cgroup under the executor’s cgroup path, such as `/sys/fs/cgroup/executor/<job-id>`.
+- Enable necessary controllers (CPU, memory, I/O) in the parent’s `cgroup.subtree_control`.
 
-  
+**2. Apply Resource Limits:**
+- **CPU:** Set CPU limits in `cpu.max` to enforce hard CPU caps.
+- **Memory:** Configure maximum memory usage in `memory.max`. Exceeding this limit triggers an Out-of-Memory (OOM) kill.
+- **Disk I/O:** Define absolute throughput limits for read/write operations in `io.max` for specific devices.
 
-1.  **Create Job Cgroup**:
+**3. Prepare Command Execution Context:**
+- Instantiate the command using `exec.Command`.
+- Use `SysProcAttr` with Linux-specific flags to ensure the process starts in a controlled state.
 
-	- Create a unique sub-cgroup under the executor’s cgroup path (e.g., `/sys/fs/cgroup/executor/<job-id>`).
+```go
+cmd := exec.Command(command, args...)
+cmd.SysProcAttr = &syscall.SysProcAttr{
+    Setpgid: true, // New process group for controlled execution
+}
+```
 
-	- Enable necessary controllers (CPU, memory, I/O) in the parent’s `cgroup.subtree_control`.
+**4. Assign Process to Cgroup Immediately Upon Creation:**
+- Start the process using `cmd.Start()`.
+- Immediately assign the process to the job-specific cgroup by writing its PID to `cgroup.procs`. This ensures all subprocesses inherit the cgroup:
 
-2.  **Apply Resource Limits**:
+```go
+pid := cmd.Process.Pid
+cgroupProcsPath := fmt.Sprintf("/sys/fs/cgroup/executor/%s/cgroup.procs", jobID)
+if err := os.WriteFile(cgroupProcsPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+    log.Errorf("Failed to assign PID %d to cgroup: %v", pid, err)
+    cmd.Process.Kill()
+    return err
+}
+```
 
-	-  **CPU**: Set limits in `cpu.max` using quota and period to enforce hard CPU caps.
+**5. Enforce Limits During Execution:**
+- CPU usage exceeding configured limits is throttled by the kernel.
+- Memory usage is monitored, triggering OOM kills if limits are exceeded.
+- Disk I/O operations are throttled to maintain resource constraints.
 
-	-  **Memory**: Set maximum allowed memory in `memory.max`; exceeding this limit triggers an OOM (Out-of-Memory) kill.
+**6. Cleanup After Job Completion:**
+- Upon job completion, remove the job’s cgroup directory.
+- Optionally, log resource usage statistics for auditing and troubleshooting.
 
-	-  **Disk I/O**: Define absolute read/write throughput limits in `io.max` for specific devices.
+This revised process ensures robust, secure, and effective resource isolation, maintaining system stability and preventing interference between jobs.
 
-3.  **Launch Job Process**:
 
-	- Start the job process using standard fork/exec.
 
-	- The process initially inherits the executor's default cgroup.
-
-4.  **Assign Process to Cgroup**:
-
-	- Immediately move the job process into the newly created cgroup by writing its PID into `cgroup.procs`.
-
-	- Child processes automatically inherit this cgroup.
-
-5.  **Enforce Limits During Execution**:
-
-	- CPU usage is throttled by the kernel if it exceeds the configured limits.
-
-	- Memory allocations are monitored, and excessive usage triggers OOM kills.
-
-	- Disk I/O operations are throttled to ensure they remain within defined limits.
-
-6.  **Cleanup After Job Completion**:
-
-	- After the job ends, the executor cleans up by removing the job’s cgroup directory.
-
-	- Optionally, log resource usage statistics before cleanup.
-
-  
-This process ensures each job runs within isolated resource constraints, maintaining system stability and preventing interference between jobs.
 
 ### Behavior & Flexibility
 
