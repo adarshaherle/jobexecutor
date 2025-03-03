@@ -119,6 +119,7 @@ The Job Executor exposes a gRPC API to manage job execution remotely. The availa
 syntax = "proto3";
 
 package job;
+
 // Enum for job status.
 enum Status {
     STATUS_UNKNOWN = 0;
@@ -127,21 +128,31 @@ enum Status {
     STATUS_FAILED = 3;
     STATUS_CANCELLED = 4;
 }
+
 // Request to start a job.
 message JobStartRequest {
     string command = 1;
     repeated string args = 2;
 }
+
 // Response from StartJob.
 message JobStartResponse {
     string job_id = 1;
 }
-// Request by job ID.
-message JobIDRequest {
+
+// Request for StopJob.
+message StopJobRequest {
     string job_id = 1;
 }
+
 // Response for StopJob.
 message JobStopResponse {}
+
+// Request for GetStatus.
+message GetStatusRequest {
+    string job_id = 1;
+}
+
 // Response for GetStatus.
 message JobStatusResponse {
     string job_id = 1;
@@ -149,19 +160,22 @@ message JobStatusResponse {
     int32 exit_code = 3;
     string error_message = 4;
 }
+
 // Request to stream job output.
 message JobOutputRequest {
     string job_id = 1;
 }
+
 // Output chunk message.
 message JobOutputChunk {
     bytes data = 1;
 }
+
 // The JobService definition.
 service JobService {
     rpc StartJob(JobStartRequest) returns (JobStartResponse);
-    rpc StopJob(JobIDRequest) returns (JobStopResponse);
-    rpc GetStatus(JobIDRequest) returns (JobStatusResponse);
+    rpc StopJob(StopJobRequest) returns (JobStopResponse);
+    rpc GetStatus(GetStatusRequest) returns (JobStatusResponse);
     rpc StreamOutput(JobOutputRequest) returns (stream JobOutputChunk);
 }
 ```
