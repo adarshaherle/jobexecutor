@@ -94,9 +94,6 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 - **Confirmation**: A `JobStopResponse` confirms termination, with errors reported via gRPC status.
 - **Concurrency Control**: Mutex ensures consistent updates and prevents deadlocks.
 
-**Note**: Sending signals to the process group ensures that both the parent process and its child processes receive the termination signals. While `SIGTERM` allows processes to perform cleanup operations, `SIGKILL` forcefully terminates processes without allowing cleanup. It's important to note that `SIGKILL` may not terminate processes that are in an uninterruptible sleep state.
-
-
 **Output Capture and Streaming**
 
 - **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
@@ -348,9 +345,6 @@ The Job Executor testing will involve the following approaches:
 - **Stability**:
   - Verify resource cleanup after job completion or cancellation.
   - Confirm no resource leaks under high concurrency.
-
-
-
 
 ## Trade-offs
 
