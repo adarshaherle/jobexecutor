@@ -319,14 +319,32 @@ jobexec --verbose  # Enables detailed logging
 The Job Executor testing will involve the following approaches:
 
 - **Unit Testing**: Utilize Go's testing framework to verify job initiation, execution, termination, output capture, and error handling.
-- **Integration Testing**: Perform tests within Docker containers to provide consistent Linux environments, confirming cgroup-based resource isolation (CPU, memory, I/O) and secure mTLS communications.
+- **Integration Testing**: Perform tests within Docker containers to provide consistent Linux environments, confirming cgroup-based resource isolation (CPU, memory, I/O).
 - **Concurrency Testing**: Apply Go's race detector to detect concurrency issues and ensure thread-safe management during simultaneous job executions.
 
 **Goals:**
-- Ensure correct operation of job lifecycle processes.
-- Verify secure and reliable client-server interactions via mTLS.
-- Confirm effective resource isolation through cgroups.
-- Maintain stability and prevent resource leaks under concurrent workloads.
+
+- **Job lifecycle correctness**:
+  - Verify correct state transitions (Running → Completed, Failed, Cancelled).
+  - Ensure accurate job outputs and status reporting via gRPC.
+
+- **Resource isolation**:
+  - Confirm cgroups enforce CPU, memory, and I/O limits.
+  - Validate termination of jobs exceeding resource limits.
+
+- **Concurrency safety**:
+  - Detect and eliminate race conditions using Go's race detector.
+  - Validate mutex locking for shared state protection.
+
+- **Output streaming**:
+  - Confirm reliable real-time and historical output streaming.
+  - Ensure correct handling of concurrent streaming clients.
+
+- **Stability**:
+  - Verify resource cleanup after job completion or cancellation.
+  - Confirm no resource leaks under high concurrency.
+
+
 
 
 ## Trade-offs
