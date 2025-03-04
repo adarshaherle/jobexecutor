@@ -204,35 +204,25 @@ When you start a job, the executor follows these updated steps to isolate resour
 
 **3. Prepare Command Execution Context:**
 - Instantiate the command using `exec.Command`.
-- Use `SysProcAttr` with Linux-specific flags to ensure the process starts in a controlled state:
+- Use `SysProcAttr` with Linux-specific flags, including `Setpgid` for controlled execution and `CgroupFD` to directly place the process into the cgroup at creation time:
 
 ```go
+cgroupPath := fmt.Sprintf("/sys/fs/cgroup/executor/%s", jobID)
+cgroupFile, err := os.Open(cgroupPath)
+if err != nil {
+    log.Fatalf("Failed to open cgroup path: %v", err)
+}
+defer cgroupFile.Close()
+
 cmd := exec.Command(command, args...)
 cmd.SysProcAttr = &syscall.SysProcAttr{
-    Setpgid: true, // New process group for controlled execution
+    Setpgid:  true,                  // New process group for controlled execution
+    CgroupFD: int(cgroupFile.Fd()),  // Start the process directly in the cgroup
 }
 ```
 
-**4. Launch the Job Process Inside the Cgroup:**
-- **Freeze the Cgroup:** Before launching the job, freeze the cgroup by writing `1` to its `cgroup.freeze` file. This pauses any process that is added.
-- **Launch via a Wrapper Stub:** Instead of directly executing the job command with `cmd.Start()`, run a minimal Go wrapper stub that:
-  - Immediately writes its own PID into the cgroup (using the containerd/cgroups API or a direct file write) so that the process is born inside the cgroup.
-  - Calls `syscall.Exec` to replace itself with the target command.
-  
-  *Example snippet from the stub:*
-
-  ```go
-  // In the wrapper stub:
-  pid := os.Getpid()
-  if err := cg.Add(cgroups.Process{Pid: pid}); err != nil {
-      log.Errorf("Failed to add process PID %d to cgroup: %v", pid, err)
-      os.Exit(1)
-  }
-  // Exec the real job command; at this point, the process is in the frozen cgroup.
-  syscall.Exec(targetCmd, append([]string{targetCmd}, targetArgs...), os.Environ())
-  ```
-
-- **Thaw the Cgroup:** Once the stub has joined the cgroup, unfreeze it by writing `0` to `cgroup.freeze`. This resumes execution, ensuring the entire job (and any forked processes) run inside the cgroup.
+**4. Launch the Job Process:**
+- Using `cmd.Start()`, the process is now directly created inside the target cgroup, eliminating the race condition.
 
 **5. Enforce Limits During Execution:**
 - The kernel throttles CPU usage that exceeds configured limits.
