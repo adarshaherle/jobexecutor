@@ -1,7 +1,7 @@
 # RFD 0001 – Proposed Job Executor Design
 
-Authors: Adarsha Raghavendra
-Created: 2025-02-27
+Authors: Adarsha Raghavendra,
+Created: 2025-02-27,
 Status: Proposed
 
 ## What
@@ -229,13 +229,6 @@ if err := os.WriteFile(cgroupProcsPath, []byte(strconv.Itoa(pid)), 0644); err !=
 - Upon job completion, remove the job’s cgroup directory.
 - Optionally, log resource usage statistics for auditing and troubleshooting.
 
-### Behavior & Flexibility
-
--  **Linux Enforcement**: Cgroup limits are fully applied.
-
--  **Non-Linux/Disabled Mode**: Uses no-op stubs for development environments without cgroup support.
-
--  **Graceful Degradation**: If cgroups are unavailable, logs warnings but still executes jobs without restrictions.
 
 ## Security: mTLS Authentication and Authorization
 
