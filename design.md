@@ -273,10 +273,7 @@ The server certificate, key, and CA certificate must be provided via configurati
 The CLI client also loads its client certificate and CA certificate to authenticate with the server.
 
 ### TLS Version Policy
-
--   TLS **1.3 is enforced by default**, providing enhanced security features including faster handshakes, improved encryption algorithms, and better performance.
--   Cipher suites are explicitly limited to modern and secure options (AES-GCM, ChaCha20-Poly1305).
--   TLS **1.2 fallback is optional** and generally not recommended unless necessary for compatibility reasons, given that TLS 1.3 is strongly preferred due to its improved security posture.
+TLS 1.3 is used by default for all client-server communications, delivering enhanced security and performance. Optionally plan to support TLS 1.2 for backward compatibility and must be explicitly enabled.
 
 ## CLI Tool and User Experience
 
