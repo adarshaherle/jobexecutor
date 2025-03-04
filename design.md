@@ -1,4 +1,4 @@
-# RFD 0001 – Proposed Job Executor Design
+# RFD 0001 – Job Executor Design
 
 Authors: Adarsha Raghavendra,
 Created: 2025-02-27,
