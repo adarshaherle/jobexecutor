@@ -191,20 +191,20 @@ service JobService {
 
 Each job is assigned a dedicated cgroup to enforce resource limits on CPU, memory, and disk I/O, ensuring controlled execution.
 
-When you start a job, the executor follows these updated steps to isolate resources:
+When you start a job, the executor follows these updated steps to isolate resources and eliminate the race condition where a process might fork before being added to its cgroup:
 
 **1. Create Job Cgroup:**
-- Create a unique sub-cgroup under the executor’s cgroup path, such as `/sys/fs/cgroup/executor/<job-id>`.
-- Enable necessary controllers (CPU, memory, I/O) in the parent’s `cgroup.subtree_control`.
+- Create a unique sub-cgroup under the executor’s cgroup path, for example `/sys/fs/cgroup/executor/<job-id>`.
+- Enable the necessary controllers (CPU, memory, I/O) in the parent’s `cgroup.subtree_control`.
 
 **2. Apply Resource Limits:**
 - **CPU:** Set CPU limits in `cpu.max` to enforce hard CPU caps.
 - **Memory:** Configure maximum memory usage in `memory.max`. Exceeding this limit triggers an Out-of-Memory (OOM) kill.
-- **Disk I/O:** Define absolute throughput limits for read/write operations in `io.max` for specific devices.
+- **Disk I/O:** Define throughput limits for read/write operations in `io.max` for specific devices.
 
 **3. Prepare Command Execution Context:**
 - Instantiate the command using `exec.Command`.
-- Use `SysProcAttr` with Linux-specific flags to ensure the process starts in a controlled state.
+- Use `SysProcAttr` with Linux-specific flags to ensure the process starts in a controlled state:
 
 ```go
 cmd := exec.Command(command, args...)
@@ -213,28 +213,35 @@ cmd.SysProcAttr = &syscall.SysProcAttr{
 }
 ```
 
-**4. Assign Process to Cgroup Immediately Upon Creation:**
-- Start the process using `cmd.Start()`.
-- Immediately assign the process to the job-specific cgroup by writing its PID to `cgroup.procs`. This ensures all subprocesses inherit the cgroup:
+**4. Launch the Job Process Inside the Cgroup:**
+- **Freeze the Cgroup:** Before launching the job, freeze the cgroup by writing `1` to its `cgroup.freeze` file. This pauses any process that is added.
+- **Launch via a Wrapper Stub:** Instead of directly executing the job command with `cmd.Start()`, run a minimal Go wrapper stub that:
+  - Immediately writes its own PID into the cgroup (using the containerd/cgroups API or a direct file write) so that the process is born inside the cgroup.
+  - Calls `syscall.Exec` to replace itself with the target command.
+  
+  *Example snippet from the stub:*
 
-```go
-pid := cmd.Process.Pid
-cgroupProcsPath := fmt.Sprintf("/sys/fs/cgroup/executor/%s/cgroup.procs", jobID)
-if err := os.WriteFile(cgroupProcsPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
-    log.Errorf("Failed to assign PID %d to cgroup: %v", pid, err)
-    cmd.Process.Kill()
-    return err
-}
-```
+  ```go
+  // In the wrapper stub:
+  pid := os.Getpid()
+  if err := cg.Add(cgroups.Process{Pid: pid}); err != nil {
+      log.Errorf("Failed to add process PID %d to cgroup: %v", pid, err)
+      os.Exit(1)
+  }
+  // Exec the real job command; at this point, the process is in the frozen cgroup.
+  syscall.Exec(targetCmd, append([]string{targetCmd}, targetArgs...), os.Environ())
+  ```
+
+- **Thaw the Cgroup:** Once the stub has joined the cgroup, unfreeze it by writing `0` to `cgroup.freeze`. This resumes execution, ensuring the entire job (and any forked processes) run inside the cgroup.
 
 **5. Enforce Limits During Execution:**
-- CPU usage exceeding configured limits is throttled by the kernel.
-- Memory usage is monitored, triggering OOM kills if limits are exceeded.
-- Disk I/O operations are throttled to maintain resource constraints.
+- The kernel throttles CPU usage that exceeds configured limits.
+- Memory usage is monitored, and if limits are exceeded, an OOM kill is triggered.
+- Disk I/O operations are limited as configured.
 
 **6. Cleanup After Job Completion:**
-- Upon job completion, remove the job’s cgroup directory.
-- Optionally, log resource usage statistics for auditing and troubleshooting.
+- After the job completes, remove the job’s cgroup directory.
+- Optionally log resource usage statistics for auditing and troubleshooting.
 
 ## Security: mTLS Authentication and Authorization
 
