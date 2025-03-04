@@ -94,13 +94,18 @@ Efficient job lifecycle management ensures seamless execution, monitoring, and t
 
 **Output Capture and Streaming**
 
--   **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
--   **Streaming to Clients**: Clients access the complete buffered output via the `StreamOutput` RPC, receiving both historical data from job start and new data in real-time.
--   **Handling Late Subscribers**: New clients connecting to the stream first receive all previously captured data before live-streaming resumes.
--   **Concurrent Streaming Support**: Multiple clients can simultaneously stream a job's output, managed through synchronized broadcasting mechanisms ensuring data consistency and integrity.
--   **Buffer Management**: Currently, outputs are fully buffered in memory, suitable for typical use cases. Future enhancements could include rolling buffers or disk-based storage to accommodate very large outputs efficiently.
+- **Capture Mechanism**: Job output (stdout and stderr) is captured from the start by redirecting the output pipes of the job’s `exec.Command` to a thread-safe, in-memory byte buffer protected by mutexes.
+- **Streaming to Clients**: Clients access the complete buffered output via the `StreamOutput` RPC, receiving both historical data from job start and new data in real-time.
+- **Handling Late Subscribers**: New clients connecting to the stream first receive all previously captured data before live-streaming resumes.
+- **Concurrent Streaming Support**: Multiple clients can simultaneously stream a job's output, managed through synchronized broadcasting mechanisms ensuring data consistency and integrity.
+- **Buffer Management**: Currently, outputs are fully buffered in memory, suitable for typical use cases. Future enhancements could include rolling buffers or disk-based storage to accommodate very large outputs efficiently.
 
-Utilizing `exec.Command` ensures compatibility with native OS process management, while mutex-protected structures maintain robust lifecycle management and thread safety.
+**Synchronized Broadcasting Implementation Details**
+
+- **Subscriber Management**: Clients subscribe to output streams via dedicated Go channels. Subscribers are individually tracked within a map (subscriber ID → Go channel) protected by a mutex, ensuring thread-safe management.
+- **Broadcasting Goroutine**: A single goroutine continuously reads from the captured output buffer and broadcasts each chunk of output concurrently to all active subscribers, efficiently using Go channels for non-blocking distribution.
+- **Seamless Transition from Historical to Live Data**: Upon connecting, each subscriber first receives buffered historical output directly from the in-memory buffer. Immediately following the delivery of historical data, the subscriber’s channel seamlessly switches to receiving live-streamed data without interruption or loss.
+
 
 ## gRPC API
 
