@@ -229,7 +229,6 @@ if err := os.WriteFile(cgroupProcsPath, []byte(strconv.Itoa(pid)), 0644); err !=
 - Upon job completion, remove the job’s cgroup directory.
 - Optionally, log resource usage statistics for auditing and troubleshooting.
 
-
 ## Security: mTLS Authentication and Authorization
 
 Security in Job Executor relies on mutual TLS (mTLS), where both client and server authenticate each other using X.509 certificates signed by a trusted shared Certificate Authority (CA).
@@ -310,34 +309,28 @@ jobexec --output=json  # JSON-formatted output
 jobexec --verbose  # Enables detailed logging
 ```
 
-## Testing and Reliability Considerations
+## Testing Plan
 
-The test plan ensures reliable operation of the Job Executor:
+The Job Executor testing will involve the following approaches:
 
-- **Unit Tests**: Validate job initiation, execution, termination, state transitions, and output handling.
+- **Unit Testing**: Utilize Go's testing framework to verify job initiation, execution, termination, output capture, and error handling.
+- **Integration Testing**: Perform tests within Docker containers to provide consistent Linux environments, confirming cgroup-based resource isolation (CPU, memory, I/O) and secure mTLS communications.
+- **Concurrency Testing**: Apply Go's race detector to detect concurrency issues and ensure thread-safe management during simultaneous job executions.
 
-- **Integration Tests**: Confirm cgroup resource isolation and secure mTLS communication in Docker setups.
+**Goals:**
+- Ensure correct operation of job lifecycle processes.
+- Verify secure and reliable client-server interactions via mTLS.
+- Confirm effective resource isolation through cgroups.
+- Maintain stability and prevent resource leaks under concurrent workloads.
 
-- **Concurrency Testing**: Detect and resolve concurrency issues using Go's race detector.
-
-**Goals**:
-
-- Prevent resource leaks and ensure clean goroutine management.
-
-- Provide consistent, clear error logging for stability and ease of debugging.
 
 ## Trade-offs
 
 During the design of Job Executor, several trade-offs were made to keep the system simple and focused. This section outlines the key limitations and decisions, and the reasoning behind them:
 
--   **In-Memory Storage:** Job definitions and statuses are kept in memory, eliminating the need for a database. This simplifies deployment and speeds development but means data is lost on service restarts and can't be shared between instances.
-    
--   **No Caching:** Every request reads fresh from memory. While adequate for small loads, it may lead to inefficiencies if operations become costly at scale.
-    
--   **Basic Concurrency:** Job execution uses simple concurrency controls (e.g., semaphores) without a sophisticated worker pool. This limits dynamic scaling and persistence of jobs.
-    
--   **Immediate Execution:** Jobs run as soon as a slot is available, with no built-in scheduling for future execution.
-    
--   **Security Trade-off:** mTLS ensures strong security but lacks granular access controls (like RBAC or API tokens), treating all authenticated clients equally.
-    
+-   **In-Memory Storage:** Job definitions and statuses are kept in memory, eliminating the need for a database. This simplifies deployment and speeds development but means data is lost on service restarts and can't be shared between instances.    
+-   **No Caching:** Every request reads fresh from memory. While adequate for small loads, it may lead to inefficiencies if operations become costly at scale  
+-   **Basic Concurrency:** Job execution uses simple concurrency controls (e.g., semaphores) without a sophisticated worker pool. This limits dynamic scaling and persistence of jobs. 
+-   **Immediate Execution:** Jobs run as soon as a slot is available, with no built-in scheduling for future execution.  
+-   **Security Trade-off:** mTLS ensures strong security but lacks granular access controls (like RBAC or API tokens), treating all authenticated clients equally.   
 -   **Limited Features:** Missing capabilities such as automatic retries, dependency management, and multi-node distribution restrict the system to simple, controlled environments.
