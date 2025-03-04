@@ -266,11 +266,7 @@ Generated Files:
 -   **server.key / server.crt**: Server’s private key and CA-signed certificate.
 -   **alice.key / alice.crt**: Client’s private key and CA-signed certificate uniquely identifying the user "alice."
 
-Server and client configurations are set up to mutually trust certificates issued by this shared CA.
-
-The server certificate, key, and CA certificate must be provided via configuration flags (`--cert`, `--key`, `--ca`).
-
-The CLI client also loads its client certificate and CA certificate to authenticate with the server.
+Server and client configurations are set up to mutually trust certificates issued by this shared CA. The server certificate, key, and CA certificate must be provided via configuration flags (`--cert`, `--key`, `--ca`).The CLI client also loads its client certificate and CA certificate to authenticate with the server.
 
 ### TLS Version Policy
 TLS 1.3 is used by default for all client-server communications, delivering enhanced security and performance. Optionally plan to support TLS 1.2 for backward compatibility and must be explicitly enabled.
@@ -291,21 +287,28 @@ The Job Executor includes a user-friendly command-line interface (CLI) tool name
 
 - **`jobexec stop <job-id>`**
   - Sends a termination request via the `StopJob` RPC.
-  - The server sends a graceful termination signal (`SIGTERM`), escalating to a forceful kill (`SIGKILL`) if necessary after a timeout.
+  - The server first attempts a graceful termination using `SIGTERM`, escalating to `SIGKILL` after a timeout if necessary.
   - Updates job status to "Cancelled" and cleans up resources.
 
 - **`jobexec logs <job-id>`**
   - Streams historical and real-time job output via the `StreamOutput` RPC.
 
-### Additional Features
+### Secure Connection Configuration
 
-- **`--output=json`**
-  - Outputs responses in JSON format for scripting.
+```sh
+jobexec --server <hostname:port> --cert <path-to-cert> --key <path-to-key> --ca <path-to-ca>
+```
+- **`--server`**: Job Executor server address.
+- **`--cert`**: Path to client’s TLS certificate.
+- **`--key`**: Path to private key.
+- **`--ca`**: Path to CA certificate for validation.
 
-- **`--verbose`**
-  - Enables detailed logging for debugging.
+### Additional Flags
 
-The CLI securely connects to the server via mutual TLS (mTLS) using configured certificates.
+```sh
+jobexec --output=json  # JSON-formatted output
+jobexec --verbose  # Enables detailed logging
+```
 
 ## Testing and Reliability Considerations
 
